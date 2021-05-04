@@ -43,6 +43,12 @@ void errorHandler(uint16_t errorId = GEN_ERR)
     exit(-1);
 }
 
+void welcome()
+{
+    cout << " *********************************************************************** " << endl;
+    cout << "                           SECURE COMMUNICATION " << endl;
+    cout << " *********************************************************************** " << endl;
+}
 
 int main(int argc, char* argv[])
 {
@@ -50,7 +56,6 @@ int main(int argc, char* argv[])
     int len;                    // size message
     int size;                   // server response size
     uint16_t sizeMsgServer;     // size msg server on the net
-    
 
     struct sockaddr_in srv_addr;
     char* risp;
@@ -70,52 +75,60 @@ int main(int argc, char* argv[])
     
     // Socket connection
     int ret = connect(sock_id, (struct sockaddr*)&srv_addr, sizeof(srv_addr));
-    
     if(ret < 0)
         errorHandler(CONN_ERR);
-
-    char* toSend = "Test Message";
-
-    len = strlen(toSend)+1; // +1 due to the string terminator that it is not taken into account in strlen
-    lmsg = htons(len);
     
-    // Send string sizeto the server
-    ret = send(sock_id,(void*)&lmsg,sizeof(uint16_t),0);
-        
-    // Send the string to the server
-    ret = send(sock_id, (void*) toSend, len, 0);
-     
-    if(ret < 0)
-        errorHandler(SEND_ERR); 
+    welcome();
 
-    // Wait for response
-    // response size
-    ret = recv(sock_id, (void*)&sizeMsgServer, sizeof(uint16_t), 0);
+    while(true)
+    {
+        // Read msg from the std input
+        const char* toSend = NULL;
+        string msgFromStdIn;
+        printf(" > ");
+        cin >> msgFromStdIn;
+        toSend = msgFromStdIn.c_str();
+
+        if(msgFromStdIn.compare("!exit")==0)
+                break;
+
+        // compute msg len
+        len = strlen(toSend)+1; // +1 due to the string terminator that it is not taken into account in strlen
+        lmsg = htons(len);
         
-    if(ret < 0)
-        errorHandler(REC_ERR);
+        // Send string size to the server
+        ret = send(sock_id,(void*)&lmsg,sizeof(uint16_t),0);
+        if(ret < 0)
+            errorHandler(SEND_ERR); 
+
+        // Send the string to the server
+        ret = send(sock_id, (void*) toSend, len, 0);
+        if(ret < 0)
+            errorHandler(SEND_ERR); 
+
+        // Wait for response
+        // response size
+        ret = recv(sock_id, (void*)&sizeMsgServer, sizeof(uint16_t), 0);  
+        if(ret < 0)
+            errorHandler(REC_ERR);
+        size = ntohs(sizeMsgServer);
+            
+        // Buffer for response
+        risp = (char*)malloc(sizeof(char)*size);
+        if(!risp)
+            errorHandler(MALLOC_ERR);
+            
+        // Server response
+        ret = recv(sock_id, (void*)risp, size, 0); 
+        if(ret < 0)
+            errorHandler(REC_ERR);
+            
+        printf("%s\n", risp);   
+
+        free(risp);
+    }
     
-    size = ntohs(sizeMsgServer);
-        
-    // Buffer for response
-    risp = (char*)malloc(sizeof(char)*size);
-       
-    if(!risp)
-        errorHandler(MALLOC_ERR);
-        
-    // Server response
-    ret = recv(sock_id, (void*)risp, size, 0);
-        
-    if(ret < 0)
-        errorHandler(REC_ERR);
-          
-    printf("%s\n", risp);   
-
-    //memset(&buffer, 0, 1024);
-    free(risp);
-    //memset(&tosend, 0, 1024);
-
     close(sock_id);
-
+    cout << "Bye Bye" << endl;
     return 0;
 }
