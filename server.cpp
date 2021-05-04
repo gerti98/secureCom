@@ -11,7 +11,7 @@
 using namespace std;
 
 //Parameters of connection
-const char* srv_ipv4 = "192.168.4.5";
+const char* srv_ipv4 = "127.0.0.1";//"192.168.4.5";
 const int srv_port = 4242;
 
 //TODO: maybe create a conf file to get configuration parameters eventually
