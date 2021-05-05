@@ -1,5 +1,5 @@
 CC= g++
-CFLAGS= -c 
+CFLAGS= -c -g
 LIB= -lcrypto
 
 all: client server

@@ -2,3 +2,7 @@ client
 server
 *.o
 crypto
+*.log
+*.aux
+*.gz
+*.toc

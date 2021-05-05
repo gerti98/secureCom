@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 
 #include "constant.h"
 #include "util.h"
@@ -53,25 +54,60 @@ int main(){
         pid = fork();
 
         if(pid == 0){
-            //child process
-            close(listen_socket_id);
-            cout << "[LOG] connection established with client" << endl;
+            //Child process
+            while(true){
+                uint16_t sizeMsgClient;
+                int size;
+                char* msgClient;
 
-            //Send ACK to client
-            strcpy(send_buffer, "ACK");
-            len = strlen(send_buffer);
-            ret = send(comm_socket_id, (void*)send_buffer, len, 0);
-            if(ret < len)
-                errorHandler(SEND_ERR);
-            
+                close(listen_socket_id);
+                cout << "[LOG] connection established with client" << endl;
 
-            cout << "[LOG] ACK sent to client" << endl;
-
-            
-            if(-1 == close(comm_socket_id))
-                errorHandler(CLOSE_ERR);
+                //Send ACK to client
+                strcpy(send_buffer, "ACK");
+                len = strlen(send_buffer);
                 
-            exit(0);
+                //Obtain message length from client
+                ret = recv(comm_socket_id, (void*)&sizeMsgClient, sizeof(uint16_t), 0);
+                if(ret < 0)
+                    errorHandler(REC_ERR);
+                if(ret = 0)
+                    vlog("No message from the server");
+                
+                size = ntohs(sizeMsgClient);
+                if(size>INT_MAX/sizeof(char))
+                    errorHandler(INT_OW_ERR);
+                
+                msgClient = (char*)malloc(sizeof(char)*size);
+                if(!msgClient)
+                    errorHandler(MALLOC_ERR);
+
+                ret = recv(comm_socket_id, (void*)msgClient, size, 0);
+                if(ret < 0)
+                    errorHandler(REC_ERR);
+                if(ret = 0)
+                    vlog("No message from the server");
+
+
+                string tmp(msgClient);
+                log("Msg received is " + tmp);
+                
+                /*
+                * TODO: DEMULTIPLEXING TO ADD
+                */ 
+
+                
+                //For now just an echo
+                ret = send(comm_socket_id, (void*)&sizeMsgClient, sizeof(uint16_t), 0);
+                if(ret < 0 || ret!=sizeof(uint16_t))
+                    errorHandler(SEND_ERR);
+
+                ret = send(comm_socket_id, (void*)msgClient, size, 0);  
+                if(ret < 0 || ret != size)
+                    errorHandler(SEND_ERR);
+
+                free(msgClient);
+            }        
         } else if(pid == -1){
             errorHandler(FORK_ERR);
         }
