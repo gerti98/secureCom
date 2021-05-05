@@ -18,6 +18,8 @@ void welcome()
     cout << " *********************************************************************** " << endl;
     cout << "                           SECURE COMMUNICATION " << endl;
     cout << " *********************************************************************** " << endl;
+    cout << "   !exit       Close the application" << endl;
+    cout << "   !help       See all the possible commands (work in progress)" << endl;
 }
 
 int main(int argc, char* argv[])
