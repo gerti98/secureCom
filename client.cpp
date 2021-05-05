@@ -7,10 +7,12 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <iostream>
-#include "errorConstant.h"
+#include "constant.h"
+#include "util.h"
 
 using namespace std;
 
+/*
 void errorHandler(uint16_t errorId = GEN_ERR)
 {
     switch (errorId)
@@ -42,6 +44,7 @@ void errorHandler(uint16_t errorId = GEN_ERR)
 
     exit(-1);
 }
+*/
 
 void welcome()
 {

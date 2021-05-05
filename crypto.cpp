@@ -141,12 +141,14 @@ int aes_128_cbc_encrypt(uchar *plaintext, int plaintext_len, uchar *key, uchar *
 {
     return sym_encrypt(EVP_aes_128_cbc(),plaintext,  plaintext_len, key, iv, ciphertext );
 }
+
 int aes_128_cbc_decrypt(uchar **plaintext, int ciphertext_len, uchar *key, uchar *iv, uchar *ciphertext)
 {
     return sym_decrypt(EVP_aes_128_cbc(),plaintext,  ciphertext_len, key, iv, ciphertext );
 }
 
 // it's possible to permfor encryption/decryption without direct calling openSSL library
+/*
 int main(){
 
     uchar key[] = "0123456789abcdeF";
@@ -166,4 +168,6 @@ int main(){
     free(iv);
     free(ciphertext);
     free(plainres);
+
 }
+*/

@@ -2,7 +2,7 @@ CC= g++
 CFLAGS= -c 
 LIB= -lcrypto
 
-all: client server crypto
+all: client server
 
 server.o: server.cpp 
 	$(CC) $(CFLAGS) server.cpp
@@ -13,14 +13,14 @@ client.o: client.cpp
 crypto.o: crypto.cpp
 	$(CC) $(CFLAGS) crypto.cpp
 
+util.o: util.cpp
+	$(CC) $(CFLAGS) util.cpp
+
 server: server.o
-	$(CC) server.o -o server
+	$(CC) server.o util.o crypto.o $(LIB) -o server
 
-client: client.o
-	$(CC) client.o -o client 
-
-crypto: crypto.o
-	$(CC) crypto.o  $(LIB) -o crypto
+client: client.o util.o crypto.o
+	$(CC) client.o util.o crypto.o $(LIB) -o client 
 
 clean:
-	rm *.o client server crypto
+	rm *.o client server
