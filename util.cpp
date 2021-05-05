@@ -46,6 +46,10 @@ void errorHandler(uint16_t errorId = GEN_ERR)
     case MALLOC_ERR:
         printf("Malloc failed");
         break;
+    
+    case INT_OW_ERR
+        printf("Integer overflow avoided")
+        break;
 
     default:
         perror("Generic Error\n");
