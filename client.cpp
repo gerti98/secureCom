@@ -7,44 +7,11 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <iostream>
+#include <climits>
 #include "constant.h"
 #include "util.h"
 
 using namespace std;
-
-/*
-void errorHandler(uint16_t errorId = GEN_ERR)
-{
-    switch (errorId)
-    {
-    case GEN_ERR:
-        perror("Generic Error\n");
-        break;
-    
-    case CONN_ERR:
-        perror("Connection Error\n");
-        break;
-    
-    case SEND_ERR:
-        perror("Error during sending\n");
-        break;
-    
-    case REC_ERR:
-        perror("Error during receiving\n");
-        break;
-
-    case MALLOC_ERR:
-        printf("Malloc failed");
-        break;
-
-    default:
-        perror("Generic Error\n");
-        break;
-    }
-
-    exit(-1);
-}
-*/
 
 void welcome()
 {
@@ -58,6 +25,7 @@ int main(int argc, char* argv[])
     int sock_id;                // socket id
     int len;                    // size message
     int size;                   // server response size
+    int ret;                    // var to store function return value
     uint16_t sizeMsgServer;     // size msg server on the net
 
     struct sockaddr_in srv_addr;
@@ -69,15 +37,20 @@ int main(int argc, char* argv[])
 
     // Socket creation
     sock_id = socket(AF_INET, SOCK_STREAM, 0);
+    if(sock_id<0)
+        errorHandler(CONN_ERR);
     
     // Initialization for server address
-    memset(&srv_addr, 0, sizeof(srv_addr)); 
+    if(!memset(&srv_addr, 0, sizeof(srv_addr)))
+        errorHandler(GEN_ERR); 
     srv_addr.sin_family = AF_INET;
     srv_addr.sin_port = htons(srv_port);
-    inet_pton(AF_INET, srv_ip, &srv_addr.sin_addr);
+    ret = inet_pton(AF_INET, srv_ip, &srv_addr.sin_addr);
+    if(ret<=0)
+        errorHandler(CONN_ERR);
     
     // Socket connection
-    int ret = connect(sock_id, (struct sockaddr*)&srv_addr, sizeof(srv_addr));
+    ret = connect(sock_id, (struct sockaddr*)&srv_addr, sizeof(srv_addr));
     if(ret < 0)
         errorHandler(CONN_ERR);
     
@@ -98,15 +71,17 @@ int main(int argc, char* argv[])
         // compute msg len
         len = strlen(toSend)+1; // +1 due to the string terminator that it is not taken into account in strlen
         lmsg = htons(len);
-        
+        if(strlen(toSend))
+            vlog("Try to send a message with a size of 0");
+
         // Send string size to the server
         ret = send(sock_id,(void*)&lmsg,sizeof(uint16_t),0);
-        if(ret < 0)
-            errorHandler(SEND_ERR); 
+        if(ret < 0 || ret!=sizeof(uint16_t))
+            errorHandler(SEND_ERR);
 
         // Send the string to the server
         ret = send(sock_id, (void*) toSend, len, 0);
-        if(ret < 0)
+        if(ret < 0 || ret != len)
             errorHandler(SEND_ERR); 
 
         // Wait for response
@@ -114,9 +89,15 @@ int main(int argc, char* argv[])
         ret = recv(sock_id, (void*)&sizeMsgServer, sizeof(uint16_t), 0);  
         if(ret < 0)
             errorHandler(REC_ERR);
+        if(ret = 0)
+            vlog("No message from the server");
+
         size = ntohs(sizeMsgServer);
             
         // Buffer for response
+        if(size>INT_MAX/sizeof(char))
+            errorHandler(INT_OW_ERR);
+
         risp = (char*)malloc(sizeof(char)*size);
         if(!risp)
             errorHandler(MALLOC_ERR);
@@ -125,6 +106,8 @@ int main(int argc, char* argv[])
         ret = recv(sock_id, (void*)risp, size, 0); 
         if(ret < 0)
             errorHandler(REC_ERR);
+        if(ret = 0)
+            vlog("No message from the server");
             
         printf("%s\n", risp);   
 
