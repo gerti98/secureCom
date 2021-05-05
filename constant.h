@@ -16,6 +16,7 @@
 #define CLOSE_ERR   0x08
 #define FORK_ERR    0x09
 #define INT_OW_ERR  0x0A
+#define BUFFER_MAX  102400
 
 
 /*

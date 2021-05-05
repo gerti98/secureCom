@@ -1,9 +1,12 @@
 #include <stdlib.h>
+#include <stdio.h>
 #include <iostream>
 #include <string.h> 
 #include <openssl/evp.h>
 #include <openssl/pem.h>
 #include <openssl/rand.h>
+#include "util.h"
+#include "constant.h"
 
 using uchar=unsigned char;
 using namespace std;
@@ -22,34 +25,39 @@ using namespace std;
 int sym_encrypt(const EVP_CIPHER *cypher, uchar *plaintext, int plaintext_len, uchar *key, 
     uchar **iv,  uchar **ciphertext){
     
+    if(plaintext_len>BUFFER_MAX){
+        perror("Error: buffer too big\n");
+        return 0;
+    }
+
     if(cypher==nullptr) { 
-        cerr <<"Error: unallocated cypher\n";
+        perror("Error: unallocated cypher\n");
         return 0;
     }
   
     int block_len = EVP_CIPHER_block_size(cypher);
     int iv_len = EVP_CIPHER_iv_length(cypher);
     if(plaintext_len > INT_MAX -block_len) { 
-        cerr <<"Error: integer overflow (meggase too big?)\n";
+        perror("Error: integer overflow (meggase too big?)\n");
         return 0;
     }
 
     // allocate buffers
     *ciphertext = (uchar*) malloc(plaintext_len+block_len);
     if(ciphertext==nullptr) { 
-        cerr <<"Error: unallocated buffer\n";
+        errorHandler(MALLOC_ERR);
         return 0;
     }
     *iv = (uchar*) malloc(iv_len);
     if(iv == nullptr) { 
-        cerr <<"Error: unallocated buffer\n";
+        errorHandler(MALLOC_ERR);
         return 0;
     }
 
     // generate random IV
     RAND_poll();
     if(1 != RAND_bytes(*iv, iv_len)) { 
-        cerr <<"Error: RAND_bytes failed\n";
+        perror("Error: RAND_bytes failed\n");
         return 0;
     }
 
@@ -59,26 +67,26 @@ int sym_encrypt(const EVP_CIPHER *cypher, uchar *plaintext, int plaintext_len, u
     EVP_CIPHER_CTX *ctx;
     ctx = EVP_CIPHER_CTX_new();
     if(ctx == nullptr)    { 
-        cerr <<"Error: unallocated context\n";
+        perror("Error: unallocated context\n");
         return 0;
     }
 
     // Encrypt init
     if(1 != EVP_EncryptInit(ctx,cypher, key, *iv)) { 
-        cerr <<"Error: encryption init failed\n";
+       perror("Error: encryption init failed\n");
         return 0;
     }
 
     // Encrypt Update: one call is enough 
     if(1 != EVP_EncryptUpdate(ctx, *ciphertext, &len, plaintext, plaintext_len)) { 
-        cerr <<"Error: encryption update failed\n";
+        perror("Error: encryption update failed\n");
         return 0;
     }
     ciphertext_len = len;
 
     //Encrypt Final. Finalize the encryption and adds the padding
     if(1 != EVP_EncryptFinal(ctx, *ciphertext + len, &len)) { 
-        cerr <<"Error: encryption final failed\n";
+        perror("Error: encryption final failed\n");
         return 0;
     }
     ciphertext_len += len;
@@ -104,7 +112,7 @@ int sym_decrypt(const EVP_CIPHER *cypher, uchar **plaintext, int ciphertext_len,
     uchar *iv, uchar *ciphertext){
 
     if(cypher==nullptr) { 
-        cerr <<"Error: unallocated cypher\n";
+        perror("Error: unallocated cypher\n");
         return 0;
     }
   
@@ -112,14 +120,14 @@ int sym_decrypt(const EVP_CIPHER *cypher, uchar **plaintext, int ciphertext_len,
     int iv_len = EVP_CIPHER_iv_length(cypher);
 
     if(iv == nullptr) { 
-        cerr <<"Error: unallocated buffer\n";
+        errorHandler(MALLOC_ERR);
         return 0;
     }
     
     // allocate buffers
     *plaintext = (uchar*) malloc(ciphertext_len);
     if(*plaintext==nullptr) { 
-        cerr <<"Error: unallocated buffer\n";
+        errorHandler(MALLOC_ERR);
         return 0;
     }
     EVP_CIPHER_CTX *ctx;
@@ -130,22 +138,22 @@ int sym_decrypt(const EVP_CIPHER *cypher, uchar **plaintext, int ciphertext_len,
     /* Create and initialize the context */
     ctx = EVP_CIPHER_CTX_new();
     if(ctx == nullptr)    { 
-        cerr <<"Error: unallocated context\n";
+        perror("Error: unallocated context\n");
         return 0;
     }
 
     /* Decryption (initialization + single update + finalization */
     if(1 != EVP_DecryptInit(ctx, cypher, key, iv)){ 
-        cerr <<"Error: decrypt init failed\n";
+        perror("Error: decrypt init failed\n");
         return 0;
     }
     if(1 != EVP_DecryptUpdate(ctx, *plaintext, &len, ciphertext, ciphertext_len)){ 
-        cerr <<"Error: decrypt update failed\n";
+        perror("Error: decrypt update failed\n");
         return 0;
     }
     plainlen=len;
     if(1 != EVP_DecryptFinal(ctx, *plaintext + len, &len)){ 
-        cerr <<"Error: decrypt update failed\n";
+        perror("Error: decrypt update failed\n");
         return 0;
     }
     plainlen += len;
@@ -186,36 +194,40 @@ int aes_gcm_encrypt( uchar *plaintext, int plaintext_len, uchar* aad, uint aad_l
     const EVP_CIPHER *cypher=EVP_aes_128_gcm();
     EVP_CIPHER_CTX *ctx;
     ctx = EVP_CIPHER_CTX_new();
+    if(ctx == nullptr)    { 
+        perror("Error: unallocated context\n");
+        return 0;
+    }
     int block_len = EVP_CIPHER_block_size(cypher);
     int iv_len = EVP_CIPHER_iv_length(cypher);
     int tag_len=16;
 
     if(plaintext_len > INT_MAX -block_len) { 
-        cerr <<"Error: integer overflow (meggase too big?)\n";
+        perror("Error: integer overflow (meggase too big?)\n");
         return 0;
     }
 
     // allocate buffers
     *tag=(uchar*) malloc(tag_len); 
     if(*tag==nullptr) { 
-        cerr <<"Error: unallocated buffer\n";
+        errorHandler(MALLOC_ERR);
         return 0;
     }
     *ciphertext = (uchar*) malloc(plaintext_len+block_len);
     if(*ciphertext==nullptr) { 
-        cerr <<"Error: unallocated buffer\n";
+        errorHandler(MALLOC_ERR);
         return 0;
     }
     *iv = (uchar*) malloc(iv_len);
     if(iv == nullptr) { 
-        cerr <<"Error: unallocated buffer\n";
+        errorHandler(MALLOC_ERR);
         return 0;
     }
 
     // generate random IV
     RAND_poll();
     if(1 != RAND_bytes(*iv, iv_len)) { 
-        cerr <<"Error: RAND_bytes failed\n";
+        perror("Error: RAND_bytes failed\n");
         return 0;
     }
 
@@ -223,38 +235,38 @@ int aes_gcm_encrypt( uchar *plaintext, int plaintext_len, uchar* aad, uint aad_l
     int len;
     int ciphertext_len;
     if(ctx == nullptr)    { 
-        cerr <<"Error: unallocated context\n";
+        perror("Error: unallocated context\n");
         return 0;
     }
 
     // Encrypt init
     if(1 != EVP_EncryptInit(ctx,cypher, key, *iv)) { 
-        cerr <<"Error: encryption init failed\n";
+        perror("Error: encryption init failed\n");
         return 0;
     }
 
     // Encrypt Update: first call
     if(1 != EVP_EncryptUpdate(ctx, NULL, &len, aad, aad_len)) { 
-        cerr <<"Error: encryption update1 failed\n";
+        perror("Error: encryption update1 failed\n");
         return 0;
     }
 
     // Encrypt Update: second call
     if(1 != EVP_EncryptUpdate(ctx, *ciphertext, &len, plaintext, plaintext_len)) { 
-        cerr <<"Error: encryption update2 failed\n";
+        perror("Error: encryption update2 failed\n");
         return 0;
     }
     ciphertext_len = len;
 
     //Encrypt Final. Finalize the encryption and adds the padding
     if(1 != EVP_EncryptFinal(ctx, *ciphertext + len, &len)) { 
-        cerr <<"Error: encryption final failed\n";
+        perror("Error: encryption final failed\n");
         return 0;
     }
     ciphertext_len += len;
 
     if(1 != EVP_CIPHER_CTX_ctrl(ctx,EVP_CTRL_AEAD_GET_TAG, tag_len, *tag)){ 
-        cerr <<"Error: encryption ctrl failed\n";
+        perror("Error: encryption ctrl failed\n");
         return 0;
     }
 
@@ -285,14 +297,14 @@ int aes_gcm_decrypt(uchar *ciphertext, uint ciphertext_len, uchar* aad, uint aad
     int tag_len=16;
 
     if(ciphertext_len > INT_MAX -block_len) { 
-        cerr <<"Error: integer overflow (meggase too big?)\n";
+        perror("Error: integer overflow (meggase too big?)\n");
         return 0;
     }
 
     // allocate buffers
     *plaintext = (uchar*) malloc(ciphertext_len+block_len);
     if(*plaintext==nullptr) { 
-        cerr <<"Error: unallocated buffer\n";
+        errorHandler(MALLOC_ERR);
         return 0;
     }
 
@@ -302,38 +314,38 @@ int aes_gcm_decrypt(uchar *ciphertext, uint ciphertext_len, uchar* aad, uint aad
     EVP_CIPHER_CTX *ctx;
     ctx = EVP_CIPHER_CTX_new();
     if(ctx == nullptr)    { 
-        cerr <<"Error: unallocated context\n";
+        perror("Error: unallocated context\n");
         return 0;
     }
 
     // Encrypt init
     if(1 != EVP_DecryptInit(ctx,cypher, key, iv)) { 
-        cerr <<"Error: decryption init failed\n";
+        perror("Error: decryption init failed\n");
         return 0;
     }
 
     // Encrypt Update: first call
     if(1 != EVP_DecryptUpdate(ctx, NULL, &len, aad, aad_len)) { 
-        cerr <<"Error: decryption update1 failed\n";
+        perror("Error: decryption update1 failed\n");
         return 0;
     }
 
     // Encrypt Update: second call
     if(1 != EVP_DecryptUpdate(ctx, *plaintext, &len, ciphertext, ciphertext_len)) { 
-        cerr <<"Error: decryption update2 failed\n";
+        perror("Error: decryption update2 failed\n");
         return 0;
     }
     plaintext_len = len;
 
     if(1 != EVP_CIPHER_CTX_ctrl(ctx,EVP_CTRL_AEAD_SET_TAG, tag_len, tag)){ 
-        cerr <<"Error: decryption ctrl failed\n";
+        perror("Error: decryption ctrl failed\n");
         return 0;
     }
 
     //Encrypt Final. Finalize the encryption and adds the padding
     int ret= EVP_DecryptFinal(ctx, *plaintext + len, &len);
     if(ret<0){ 
-        cerr <<"Error: decryption final failed \n";
+        perror("Error: decryption final failed \n");
         return 0;
     }
     plaintext_len += len;
@@ -342,6 +354,68 @@ int aes_gcm_decrypt(uchar *ciphertext, uint ciphertext_len, uchar* aad, uint aad
     EVP_CIPHER_CTX_cleanup(ctx);
 
     return plaintext_len;    
+}
+
+/**
+ * @brief digest computation
+ * 
+ * @param cypher input
+ * @param plaintext input
+ * @param plaintext_len input
+ * @param ciphertext output
+ * @return digest length, 0 on error
+ */
+uint digest(const EVP_MD* cypher, uchar* plaintext, uint plaintext_len, uchar** ciphertext){
+
+    if(plaintext_len>BUFFER_MAX){
+        perror("Error: buffer too big\n");
+        return 0;
+    }
+
+    if(cypher==nullptr) { 
+        perror("Error: unallocated cypher\n");
+        return 0;
+    }
+    uint cipherlen=EVP_MD_size(cypher);
+
+    // allocate buffers
+    *ciphertext = (uchar*) malloc(cipherlen);
+    if(*ciphertext==nullptr) { 
+        errorHandler(MALLOC_ERR);
+        return 0;
+    }
+
+    uint outlen;
+    EVP_MD_CTX* md_ctx;
+    md_ctx = EVP_MD_CTX_new();
+
+    if(!EVP_DigestInit(md_ctx, cypher)){
+        perror("Error: encryption init failed\n");
+        return 0;
+    }
+    if(!EVP_DigestUpdate(md_ctx, plaintext, plaintext_len)){
+        perror("Error: encryption update failed\n");
+        return 0;
+    }
+    if(!EVP_DigestFinal(md_ctx, *ciphertext, &outlen)){
+        perror("Error: encryption final failed\n");
+        return 0;
+    }
+
+    EVP_MD_CTX_free(md_ctx);
+
+    if(outlen != cipherlen) return 0;
+    return outlen;
+}
+
+// CRYPTO_memcmp wrapper
+uint digest_compare(const uchar* digest1, const uchar* digest2, const uint len){
+   return CRYPTO_memcmp(digest1, digest2,len );
+}
+
+// sha 256 wrapper
+uint sha_256_digest(uchar* plaintext, uint plaintext_len, uchar** chipertext){
+    return digest(EVP_sha256(), plaintext, plaintext_len, chipertext);
 }
 // it's possible to permfor encryption/decryption without direct calling openSSL library
 /*
@@ -379,5 +453,8 @@ int main(){
     free(plainres);
     free(tag);
 
+
+
 }
 */
+
