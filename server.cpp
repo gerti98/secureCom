@@ -14,101 +14,102 @@
 
 using namespace std;
 
-
 //Parameters of connection
-const char* srv_ipv4 = "127.0.0.1";;
+const char *srv_ipv4 = "127.0.0.1";
+;
 const int srv_port = 4242;
 
 //TODO: maybe create a conf file to get configuration parameters eventually
 
-int main(){
-    int ret, listen_socket_id, comm_socket_id;
-    struct sockaddr_in srv_addr, cl_addr;
-    char send_buffer[1024];
-    pid_t pid;
 
-    
+int handleChatRequest(int comm_socket){
+    log("Chat request arrived");
+    return 0;    
+}
+
+
+int getOnlineUsers(){
+    log("Get Online Users request arrived");
+    return 0;    
+}
+
+int main()
+{
+    int ret;
+    int listen_socket_id, comm_socket_id;   //socket indexes
+    struct sockaddr_in srv_addr, cl_addr;   //address informations struct
+    char send_buffer[1024];                 //buffer for sending replies
+    pid_t pid;                              
+
     //Preparation of ip address struct
     memset(&srv_addr, 0, sizeof(srv_addr));
     listen_socket_id = socket(AF_INET, SOCK_STREAM, 0);
-    if(listen_socket_id == -1)
-        errorHandler(SOCK_ERR);    
-    
+    if (listen_socket_id == -1)
+        errorHandler(SOCK_ERR);
 
     srv_addr.sin_family = AF_INET;
-    srv_addr.sin_port = htons(srv_port); 
+    srv_addr.sin_port = htons(srv_port);
     inet_pton(AF_INET, srv_ipv4, &srv_addr.sin_addr);
-    cout << "[LOG] address struct preparation..." << endl;
-    
-    if(-1 == bind(listen_socket_id, (struct sockaddr*)&srv_addr, sizeof(srv_addr)))
+    log("address struct preparation...");
+
+    if (-1 == bind(listen_socket_id, (struct sockaddr *)&srv_addr, sizeof(srv_addr)))
         errorHandler(BIND_ERR);
 
-    if(-1 == listen(listen_socket_id, SOCKET_QUEUE))
+    if (-1 == listen(listen_socket_id, SOCKET_QUEUE))
         errorHandler(LISTEN_ERR);
 
     unsigned int len = sizeof(cl_addr);
     log("Socket is listening...");
 
-    while(true){
-        comm_socket_id = accept(listen_socket_id, (struct sockaddr*)&cl_addr, &len);
+    while (true)
+    {
+        comm_socket_id = accept(listen_socket_id, (struct sockaddr *)&cl_addr, &len);
         pid = fork();
 
-        if(pid == 0){
+        if (pid == 0)
+        {
+
+            close(listen_socket_id);
+            log("Connection established with client");
+            
             //Child process
-            while(true){
-                uint16_t sizeMsgClient;
-                int size;
-                char* msgClient;
-
-                close(listen_socket_id);
-                cout << "[LOG] connection established with client" << endl;
-
-                //Send ACK to client
-                strcpy(send_buffer, "ACK");
-                len = strlen(send_buffer);
+            while (true)
+            {
+                char msgOpcode;
                 
-                //Obtain message length from client
-                ret = recv(comm_socket_id, (void*)&sizeMsgClient, sizeof(uint16_t), 0);
-                if(ret < 0)
+                //Get Opcode
+                ret = recv(comm_socket_id, (void *)&msgOpcode, sizeof(char), 0);
+                if (ret < 0)
                     errorHandler(REC_ERR);
-                if(ret = 0)
-                    vlog("No message from the server");
-                
-                size = ntohs(sizeMsgClient);
-                if(size>INT_MAX/sizeof(char))
-                    errorHandler(INT_OW_ERR);
-                
-                msgClient = (char*)malloc(sizeof(char)*size);
-                if(!msgClient)
-                    errorHandler(MALLOC_ERR);
-
-                ret = recv(comm_socket_id, (void*)msgClient, size, 0);
-                if(ret < 0)
-                    errorHandler(REC_ERR);
-                if(ret = 0)
+                if (ret = 0)
                     vlog("No message from the server");
 
-
-                string tmp(msgClient);
+                string tmp(1, msgOpcode);
                 log("Msg received is " + tmp);
                 
-                /*
-                * TODO: DEMULTIPLEXING TO ADD
-                */ 
+                switch (msgOpcode){
 
-                
-                //For now just an echo
-                ret = send(comm_socket_id, (void*)&sizeMsgClient, sizeof(uint16_t), 0);
-                if(ret < 0 || ret!=sizeof(uint16_t))
-                    errorHandler(SEND_ERR);
+                    case CHAT_CMD:
+                        ret = handleChatRequest(comm_socket_id);
+                        if(ret<0)
+                            errorHandler(GEN_ERR);
+                        break;
 
-                ret = send(comm_socket_id, (void*)msgClient, size, 0);  
-                if(ret < 0 || ret != size)
-                    errorHandler(SEND_ERR);
+                    case ONLINE_CMD:
+                        ret = getOnlineUsers();
+                        if(ret<0)
+                            errorHandler(GEN_ERR);
+                        break;
+                    
+                    default:
+                        cout << "Command Not Valid" << endl;
+                        break;
+                }
 
-                free(msgClient);
-            }        
-        } else if(pid == -1){
+            }
+        }
+        else if (pid == -1)
+        {
             errorHandler(FORK_ERR);
         }
 
