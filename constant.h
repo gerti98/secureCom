@@ -18,6 +18,14 @@
 #define INT_OW_ERR  0x0A
 #define BUFFER_MAX  102400
 
+/*
+ *  COMMAND CODE
+ */
+#define NOT_VALID_CMD   0x1
+#define EXIT_CMD        0x2
+#define ONLINE_CMD      0x3
+#define CHAT_CMD        0x4
+#define HELP_CMD        0x5
 
 /*
  *  LOGGING CONSTANTS

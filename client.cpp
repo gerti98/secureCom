@@ -19,7 +19,51 @@ void welcome()
     cout << "                           SECURE COMMUNICATION " << endl;
     cout << " *********************************************************************** " << endl;
     cout << "   !exit       Close the application" << endl;
-    cout << "   !help       See all the possible commands (work in progress)" << endl;
+    cout << "   !help       See all the possible commands" << endl;
+    cout << "-------------------------------------------------------------------------" << endl;
+}
+
+void help()
+{
+    cout << " !users_online" << endl;
+    cout << "   Ask the server to return the list of the online users" << endl;
+    cout << " !chat" << endl;
+    cout << "   Ask the server to start a chat" << endl;
+    cout << " !exit" << endl;
+    cout << "   Close the application" << endl;
+}
+
+uint8_t commandStringHandler(string cmd)
+{
+    if(cmd.compare("!exit")==0)
+        return EXIT_CMD;
+    else if(cmd.compare("!users_online")==0)
+        return ONLINE_CMD;
+    else if(cmd.compare("!chat")==0)
+        return CHAT_CMD;
+    else if(cmd.compare("!help")==0)
+        return HELP_CMD;
+    else
+        return NOT_VALID_CMD;
+}
+
+int chat()
+{
+    string username;
+    cout << " Work in progress - chat()" << endl;
+    cout << " Write the username of the user that you want to contact" << endl;
+    printf(" > ");
+    cin >> username;
+    // Salvo la stringa e la mando al server
+    return 0;
+    // TO DO
+}
+
+int getOnlineUsers()
+{
+    cout << " Work in progress - getOnlineUsers() " << endl;
+    return 0;
+    // TO DO
 }
 
 int main(int argc, char* argv[])
@@ -63,60 +107,100 @@ int main(int argc, char* argv[])
         // Read msg from the std input
         const char* toSend = NULL;
         string msgFromStdIn;
+        cout << endl;
         printf(" > ");
         cin >> msgFromStdIn;
-        toSend = msgFromStdIn.c_str();
+        cout << endl;
 
-        if(msgFromStdIn.compare("!exit")==0)
+        uint8_t commandCode = commandStringHandler(msgFromStdIn);
+
+        switch (commandCode)
+        {
+        case CHAT_CMD:
+            ret = chat();
+            if(ret<0)
+                errorHandler(GEN_ERR);
+            break;
+
+        case ONLINE_CMD:
+            ret = getOnlineUsers();
+            if(ret<0)
+                errorHandler(GEN_ERR);
+            break;
+        
+        case HELP_CMD:
+            help();
+            break;
+
+        case EXIT_CMD:
+            // The command is handled at the end of the while body
+            break;
+        
+        case NOT_VALID_CMD:
+            cout << "Command Not Valid" << endl;
+            break;
+        
+        default:
+            cout << "Command Not Valid" << endl;
+            break;
+        }
+
+        if(commandCode!=HELP_CMD) // I have to send nothing to the server if the command is help
+        {
+
+            toSend = msgFromStdIn.c_str();
+
+            // compute msg len
+            len = strlen(toSend)+1; // +1 due to the string terminator that it is not taken into account in strlen
+            lmsg = htons(len);
+            if(strlen(toSend))
+                vlog("Try to send a message with a size of 0");
+
+            // Send string size to the server
+            ret = send(sock_id,(void*)&lmsg,sizeof(uint16_t),0);
+            if(ret < 0 || ret!=sizeof(uint16_t))
+                errorHandler(SEND_ERR);
+
+            // Send the string to the server
+            ret = send(sock_id, (void*) toSend, len, 0);
+            if(ret < 0 || ret != len)
+                errorHandler(SEND_ERR); 
+
+            // Wait for response
+            // response size
+            ret = recv(sock_id, (void*)&sizeMsgServer, sizeof(uint16_t), 0);  
+            if(ret < 0)
+                errorHandler(REC_ERR);
+            if(ret = 0)
+                vlog("No message from the server");
+
+            size = ntohs(sizeMsgServer);
+                
+            // Buffer for response
+            if(size>INT_MAX/sizeof(char))
+                errorHandler(INT_OW_ERR);
+
+            risp = (char*)malloc(sizeof(char)*size);
+            if(!risp)
+                errorHandler(MALLOC_ERR);
+                
+            // Server response
+            ret = recv(sock_id, (void*)risp, size, 0); 
+            if(ret < 0)
+                errorHandler(REC_ERR);
+            if(ret = 0)
+                vlog("No message from the server");
+                
+            printf(" [DBG] Risposta: %s\n", risp);   
+
+            free(risp);
+
+            if(commandCode==EXIT_CMD)
                 break;
-
-        // compute msg len
-        len = strlen(toSend)+1; // +1 due to the string terminator that it is not taken into account in strlen
-        lmsg = htons(len);
-        if(strlen(toSend))
-            vlog("Try to send a message with a size of 0");
-
-        // Send string size to the server
-        ret = send(sock_id,(void*)&lmsg,sizeof(uint16_t),0);
-        if(ret < 0 || ret!=sizeof(uint16_t))
-            errorHandler(SEND_ERR);
-
-        // Send the string to the server
-        ret = send(sock_id, (void*) toSend, len, 0);
-        if(ret < 0 || ret != len)
-            errorHandler(SEND_ERR); 
-
-        // Wait for response
-        // response size
-        ret = recv(sock_id, (void*)&sizeMsgServer, sizeof(uint16_t), 0);  
-        if(ret < 0)
-            errorHandler(REC_ERR);
-        if(ret = 0)
-            vlog("No message from the server");
-
-        size = ntohs(sizeMsgServer);
-            
-        // Buffer for response
-        if(size>INT_MAX/sizeof(char))
-            errorHandler(INT_OW_ERR);
-
-        risp = (char*)malloc(sizeof(char)*size);
-        if(!risp)
-            errorHandler(MALLOC_ERR);
-            
-        // Server response
-        ret = recv(sock_id, (void*)risp, size, 0); 
-        if(ret < 0)
-            errorHandler(REC_ERR);
-        if(ret = 0)
-            vlog("No message from the server");
-            
-        printf("%s\n", risp);   
-
-        free(risp);
+        }
     }
     
     close(sock_id);
-    cout << "Bye Bye" << endl;
+    cout << "\n Bye Bye" << endl;
     return 0;
 }

@@ -6,3 +6,4 @@ crypto
 *.aux
 *.gz
 *.toc
+.vscode/
