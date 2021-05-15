@@ -5,23 +5,15 @@
 #include <openssl/evp.h>
 #include <openssl/pem.h>
 #include <openssl/rand.h>
+#include <openssl/x509_vfy.h>
 #include "util.h"
 #include "constant.h"
+#include <openssl/err.h> // for error descriptions
 
 using uchar=unsigned char;
 using namespace std;
 
-/**
- * @brief generic simmetric encryptioon function 
- * 
- * @param cypher input 
- * @param plaintext input 
- * @param plaintext_len input
- * @param key input
- * @param iv output
- * @param ciphertext output
- * @return ciphertext lenght, 0 on error
- */
+
 int sym_encrypt(const EVP_CIPHER *cypher, uchar *plaintext, int plaintext_len, uchar *key, 
     uchar **iv,  uchar **ciphertext){
     
@@ -97,17 +89,7 @@ int sym_encrypt(const EVP_CIPHER *cypher, uchar *plaintext, int plaintext_len, u
     return ciphertext_len;
 }
 
-/**
- * @brief generic simmetric decryptioon function 
- * 
- * @param cypher input 
- * @param plaintext output
- * @param ciphertext_len input
- * @param key input
- * @param iv input
- * @param ciphertext input
- * @return plaintext lenght, 0 on error
- */
+
 int sym_decrypt(const EVP_CIPHER *cypher, uchar **plaintext, int ciphertext_len, uchar *key, 
     uchar *iv, uchar *ciphertext){
 
@@ -417,7 +399,154 @@ uint digest_compare(const uchar* digest1, const uchar* digest2, const uint len){
 uint sha_256_digest(uchar* plaintext, uint plaintext_len, uchar** chipertext){
     return digest(EVP_sha256(), plaintext, plaintext_len, chipertext);
 }
+
+
+/**
+ * @brief verify a certificate with a self signed CA certificate and ctrl
+ * 
+ * @param certificate certificate under verification
+ * @param CAcertificate self signed CA certificate
+ * @param CACtrl self signed CA ctrl
+ * @param cert output verified certificate (null on error)
+ * @return 1 if succesfull verification, 0 otherwise
+ */
+int verify_certificate( FILE* const certificate,  FILE* const CAcertificate,  FILE* const CACtrl, X509** cert){
+    *cert=nullptr;
+    int ret; // used for return values
+   
+    // load CA certificate (self signed)
+    if(!CAcertificate){ cerr << "Error: cannot open ca certificate file (missing?)\n"; return 0; }
+    X509* cacert = PEM_read_X509(CAcertificate, NULL, NULL, NULL);
+    fclose(CAcertificate);
+    if(!cacert){ cerr << "Error: PEM_read_X509 returned NULL\n"; return 0; }
+
+    // load CA ctrl for revocation list
+    if(!CACtrl){ cerr << "Error: cannot open ca ctrl file (missing?)\n"; return 0; }
+    X509_CRL* crl = PEM_read_X509_CRL(CACtrl, NULL, NULL, NULL);
+    fclose(CACtrl);
+    if(!crl){ cerr << "Error: PEM_read_X509_CRL returned NULL\n"; return 0; }
+
+    // build a store with the CA's certificate and the CRL:
+    X509_STORE* store = X509_STORE_new();
+    if(!store) { 
+        cerr << "Error: X509_STORE_new returned NULL\n" << ERR_error_string(ERR_get_error(), NULL) << "\n"; 
+        return 0; }
+    ret = X509_STORE_add_cert(store, cacert);
+    if(ret != 1) { 
+        cerr << "Error: X509_STORE_add_cert returned " << ret << "\n" << ERR_error_string(ERR_get_error(), NULL) << "\n";
+        return 0; }
+    ret = X509_STORE_add_crl(store, crl);
+    if(ret != 1) { 
+        cerr << "Error: X509_STORE_add_crl returned " << ret << "\n" << ERR_error_string(ERR_get_error(), NULL) << "\n"; 
+        return 0; }
+    ret = X509_STORE_set_flags(store, X509_V_FLAG_CRL_CHECK);
+    if(ret != 1) { 
+        cerr << "Error: X509_STORE_set_flags returned " << ret << "\n" << ERR_error_string(ERR_get_error(), NULL) << "\n";
+        return 0; }
+
+    // load the certificate under validation
+    if(!certificate){ cerr << "Error: cannot open certificate file (missing?)\n"; return 0;}
+    *cert = PEM_read_X509(certificate, NULL, NULL, NULL);
+    fclose(certificate);
+    if(!*cert){ cerr << "Error: PEM_read_X509 returned NULL\n"; return 0; }
+
+    // verify the certificate
+    X509_STORE_CTX* certvfy_ctx = X509_STORE_CTX_new();
+    if(!certvfy_ctx) { 
+        cerr << "Error: X509_STORE_CTX_new returned NULL\n" << ERR_error_string(ERR_get_error(), NULL) << "\n"; 
+        return 0; }
+    ret = X509_STORE_CTX_init(certvfy_ctx, store, *cert, NULL);
+    if(ret != 1) { cerr << "Error: X509_STORE_CTX_init returned " << ret << "\n" << ERR_error_string(ERR_get_error(), NULL) << "\n"; 
+        return 0; }
+    ret= X509_verify_cert(certvfy_ctx);
+    X509_STORE_free(store);
+    X509_STORE_CTX_free(certvfy_ctx);
+    return ret;
+}
+
+int _verify_sing_pubkey(uchar* signature, uint sign_lenght, uchar* document, uint doc_lenght, 
+    EVP_PKEY* pubkey){
+    
+    int ret; // used for return values
+    // create the signature context:
+    // declare some useful variables:
+    const EVP_MD* md = EVP_sha256();
+    EVP_MD_CTX* md_ctx = EVP_MD_CTX_new();
+    if(!md_ctx){ cerr << "Error: EVP_MD_CTX_new returned NULL\n"; return 0; }
+
+    // verify the plaintext:
+    // (perform a single update on the whole plaintext, 
+    // assuming that the plaintext is not huge)
+    ret = EVP_VerifyInit(md_ctx, md);
+    if(ret == 0){ cerr << "Error: EVP_VerifyInit returned " << ret << "\n"; EVP_MD_CTX_free(md_ctx); return 0; }
+    ret = EVP_VerifyUpdate(md_ctx, document, doc_lenght);  
+    if(ret == 0){ cerr << "Error: EVP_VerifyUpdate returned " << ret << "\n";EVP_MD_CTX_free(md_ctx); return 0; }
+    ret = EVP_VerifyFinal(md_ctx, signature, sign_lenght, pubkey);
+    if(ret == -1){ // it is 0 if invalid signature, -1 if some other error, 1 if success.
+        cerr << "Error: EVP_VerifyFinal returned " << ret << " (invalid signature?)\n";
+        ret=0;
+    }
+    EVP_MD_CTX_free(md_ctx);
+    return ret;
+}
+
+int verify_sign_pubkey(uchar* signature, uint sign_lenght, uchar* document, uint doc_lenght, 
+    uchar* pubkey, uint key_lenght){
+        
+    // deserialiaze public key
+    EVP_PKEY* pkey=PEM_read_bio_PUBKEY(BIO_new_mem_buf(pubkey, key_lenght), NULL, NULL, NULL);
+
+    int ret=_verify_sing_pubkey(signature, sign_lenght,document, doc_lenght, pkey );
+    EVP_PKEY_free(pkey);
+
+    return ret;
+}
+
+int verify_sign_cert(FILE* const certificate,  FILE* const CAcertificate,  
+    FILE* const CACtrl, uchar* signature, uint sign_lenght, uchar* document, uint doc_lenght ){
+
+    int ret;
+    X509* verified_cert;
+    if(!signature || sign_lenght==0) { cerr << "Error: no signature \n"; return 0; }
+    if(!document || doc_lenght==0) { cerr << "Error: no document \n"; return 0; }
+
+    if(!verify_certificate( certificate,   CAcertificate,  CACtrl, &verified_cert)){
+        perror("certificate validation failed, the certificate is not valid");
+        X509_free(verified_cert);
+        return 0;
+    }
+
+    // verify the signature with extracted public key
+    ret=_verify_sing_pubkey(signature, sign_lenght, document, doc_lenght,X509_get_pubkey(verified_cert) );
+    X509_free(verified_cert);
+    return ret;
+}
 // it's possible to permfor encryption/decryption without direct calling openSSL library
+/*
+int main(){
+    cout <<"test";
+    string cacert_file_name="certification/SuperHakerCA_cert.pem";
+    FILE* cacert_file = fopen(cacert_file_name.c_str(), "r");
+    
+    string crl_file_name="certification/SuperHakerCA_crl.pem";
+    FILE* crl_file = fopen(crl_file_name.c_str(), "r");
+    string cert_file_name="certification/SecureCom_cert.pem";
+    FILE* cert_file = fopen(cert_file_name.c_str(), "r");
+    
+    X509* verified_cert;
+    if(verify_certificate(cert_file, cacert_file, crl_file,&verified_cert )){
+        char* tmp = X509_NAME_oneline(X509_get_subject_name(verified_cert), NULL, 0);
+        char* tmp2 = X509_NAME_oneline(X509_get_issuer_name(verified_cert), NULL, 0);
+        cout << "Certificate of \"" << tmp << "\" (released by \"" << tmp2 << "\") verified successfully\n";
+        free(tmp);
+        free(tmp2);
+        cout <<"test";
+    }
+    X509_free(verified_cert);
+   
+
+}
+*/
 /*
 int main(){
 
