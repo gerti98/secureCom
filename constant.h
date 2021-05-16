@@ -26,6 +26,7 @@
 #define ONLINE_CMD      0x3
 #define CHAT_CMD        0x4
 #define HELP_CMD        0x5
+#define MSG             0x6
 
 /*
  *  LOGGING CONSTANTS

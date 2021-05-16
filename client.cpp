@@ -13,6 +13,25 @@
 
 using namespace std;
 
+/* This global variable is setted to true if the user is in chat with 
+ * another client, to false otherwise*/
+bool isChatting = false;
+
+
+struct commandMSG
+{
+    uint8_t opcode;
+    int userId;
+};
+
+struct genericMSG
+{
+    uint8_t opcode;
+    uint16_t length;
+    unsigned char* payload;
+};
+
+
 void welcome()
 {
     cout << " *********************************************************************** " << endl;
@@ -47,8 +66,9 @@ uint8_t commandStringHandler(string cmd)
         return NOT_VALID_CMD;
 }
 
-int chat()
+int chat(struct commandMSG* toSend)
 {
+    toSend->opcode = CHAT_CMD; 
     string username;
     cout << " Work in progress - chat()" << endl;
     cout << " Write the username of the user that you want to contact" << endl;
@@ -56,14 +76,6 @@ int chat()
     cin >> username;
     // Salvo la stringa e la mando al server
     return 0;
-    // TO DO
-}
-
-int getOnlineUsers()
-{
-    cout << " Work in progress - getOnlineUsers() " << endl;
-    return 0;
-    // TO DO
 }
 
 int main(int argc, char* argv[])
@@ -76,7 +88,6 @@ int main(int argc, char* argv[])
 
     struct sockaddr_in srv_addr;
     char* risp;
-    uint16_t lmsg;
     
     const char* srv_ip = "127.0.0.1";
     const int srv_port = 4242;
@@ -105,68 +116,84 @@ int main(int argc, char* argv[])
     while(true)
     {
         // Read msg from the std input
-        const char* toSend = NULL;
-        string msgFromStdIn;
+        string userInput;
         cout << endl;
         printf(" > ");
-        cin >> msgFromStdIn;
+        cin >> userInput;
         cout << endl;
 
-        uint8_t commandCode = commandStringHandler(msgFromStdIn);
+        uint8_t commandCode = NOT_VALID_CMD;
+        struct genericMSG msgGenToSend;
+        struct commandMSG toSend;
 
-        switch (commandCode)
+        if(!isChatting)
         {
-        case CHAT_CMD:
-            ret = chat();
-            if(ret<0)
-                errorHandler(GEN_ERR);
-            break;
+            toSend.opcode = NOT_VALID_CMD;
 
-        case ONLINE_CMD:
-            ret = getOnlineUsers();
-            if(ret<0)
-                errorHandler(GEN_ERR);
-            break;
-        
-        case HELP_CMD:
-            help();
-            break;
+            commandCode = commandStringHandler(userInput);
 
-        case EXIT_CMD:
-            // The command is handled at the end of the while body
-            break;
-        
-        case NOT_VALID_CMD:
-            cout << "Command Not Valid" << endl;
-            break;
-        
-        default:
-            cout << "Command Not Valid" << endl;
-            break;
+            switch (commandCode)
+            {
+            case CHAT_CMD:
+                ret = chat(&toSend);
+                if(ret<0)
+                    errorHandler(GEN_ERR);
+                break;
+
+            case ONLINE_CMD:
+                toSend.opcode = ONLINE_CMD;
+                break;
+            
+            case HELP_CMD:
+                help();
+                break;
+
+            case EXIT_CMD:
+                // The command is handled at the end of the while body
+                toSend.opcode = EXIT_CMD;
+                break;
+            
+            case NOT_VALID_CMD:
+                cout << "Command Not Valid" << endl;
+                break;
+            
+            default:
+                cout << "Command Not Valid" << endl;
+                break;
+            }
+        }
+        else
+        {
+            commandCode = MSG;
+            msgGenToSend.opcode = commandCode;
+            msgGenToSend.payload = NULL;
+            msgGenToSend.length = 0;
         }
 
         if(commandCode!=HELP_CMD) // I have to send nothing to the server if the command is help
         {
+            if(isChatting)
+            {
+                // Set the length of the message
+                len = sizeof(msgGenToSend);
+                uint16_t lmsg = htons(len);
+                msgGenToSend.length = lmsg;
 
-            toSend = msgFromStdIn.c_str();
-
-            // compute msg len
-            len = strlen(toSend)+1; // +1 due to the string terminator that it is not taken into account in strlen
-            lmsg = htons(len);
-            if(strlen(toSend))
-                vlog("Try to send a message with a size of 0");
-
-            // Send string size to the server
-            ret = send(sock_id,(void*)&lmsg,sizeof(uint16_t),0);
-            if(ret < 0 || ret!=sizeof(uint16_t))
-                errorHandler(SEND_ERR);
-
-            // Send the string to the server
-            ret = send(sock_id, (void*) toSend, len, 0);
-            if(ret < 0 || ret != len)
-                errorHandler(SEND_ERR); 
+                // Send the message to the server
+                ret = send(sock_id,(void*)&msgGenToSend,sizeof(msgGenToSend),0);
+                if(ret < 0 || ret!=sizeof(msgGenToSend))
+                    errorHandler(SEND_ERR);
+            }
+            else
+            {
+                // Send the command message to the server
+                ret = send(sock_id,(void*)&toSend,sizeof(toSend),0);
+                if(ret < 0 || ret!=sizeof(toSend))
+                    errorHandler(SEND_ERR);
+            }
 
             // Wait for response
+
             // response size
             ret = recv(sock_id, (void*)&sizeMsgServer, sizeof(uint16_t), 0);  
             if(ret < 0)
