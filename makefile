@@ -1,6 +1,6 @@
 CC= g++
 CFLAGS= -c -g
-LIB= -lcrypto
+LIB= -lcrypto -lpthread -lrt
 
 all: client server
 

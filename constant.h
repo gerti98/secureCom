@@ -45,7 +45,7 @@
 ***************************/
 
 #define SOCKET_QUEUE 10
-
+#define REGISTERED_USERS 5
 
 
 #endif
