@@ -57,6 +57,7 @@ int verify_sign_pubkey(uchar* signature, uint sign_lenght, uchar* document, uint
  * @brief verify a signature on a docuemnt using a certificate, signed by a certification authority
  * 
  * @param certificate input certificate of the signer
+ * @param cert_lenght input lenght of the certificate of the signer
  * @param CAcertificate input certificate of the CA
  * @param CACtrl input
  * @param signature input
@@ -65,7 +66,9 @@ int verify_sign_pubkey(uchar* signature, uint sign_lenght, uchar* document, uint
  * @param doc_lenght input
  * @return 1 if succesfully, 0 otherwise
  */
-int verify_sign_cert(FILE* const certificate,  FILE* const CAcertificate,  FILE* const CACtrl,uchar* signature, uint sign_lenght, uchar* document, uint doc_lenght);
+int verify_sign_cert(const uchar* certificate, const uint cert_lenght,  FILE* const CAcertificate,  
+    FILE* const CAcrl, uchar* signature, uint sign_lenght, uchar* document, uint doc_lenght );
 
 
+int sign_document( const uchar* document, uint doc_lenght, FILE* const priv_key,uchar** signature, uint* sign_lenght);
 #endif
