@@ -187,7 +187,9 @@ int main(int argc, char* argv[])
             else
             {
                 // Send the command message to the server
+                cout << "Sent " << sizeof(toSend) << endl;
                 ret = send(sock_id,(void*)&toSend,sizeof(toSend),0);
+                
                 if(ret < 0 || ret!=sizeof(toSend))
                     errorHandler(SEND_ERR);
             }

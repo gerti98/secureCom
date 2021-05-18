@@ -11,12 +11,16 @@
 #include <sys/mman.h>
 #include <semaphore.h>
 #include <sys/wait.h>
+#include <openssl/evp.h>
+#include <openssl/pem.h>
+#include <openssl/rand.h>
+#include <openssl/x509_vfy.h>
 #include <fcntl.h>
 #include "constant.h"
 #include "util.h"
 
 using namespace std;
-
+using uchar=unsigned char;
 
 /*
 * socket_id: if equal to -1 the user is not connected to the service
@@ -25,6 +29,8 @@ struct user_info {
     string username;
     int socket_id; 
 };
+
+
 
 const char* sem_user_store_name = "/user_store";
 
@@ -42,19 +48,10 @@ void* create_shared_memory(ssize_t size){
     return mmap(NULL, size, protection, visibility, -1, 0);
 }
 
-int handle_chat_request(int comm_socket){
-    log("Chat request arrived");
-    return 0;    
-}
 
-
-int get_online_users(){
-    log("Get Online Users request arrived");
-    return 0;    
-}
-
-
-
+// ---------------------------------------------------------------------
+// FUNCTIONS of USER DATA STORE
+// ---------------------------------------------------------------------
 /**
  * @return -1: username not present, 0: successfully written socket data
  */
@@ -106,6 +103,28 @@ void print_user_data_store(){
         errorHandler(GEN_ERR);
 }
 
+
+user_info* get_user_datastore_copy(){
+    sem_t* sem_id= sem_open(sem_user_store_name, O_CREAT, 0600, 1);
+    if(sem_id == SEM_FAILED)
+        errorHandler(GEN_ERR);
+    if(sem_wait(sem_id) < 0)
+        errorHandler(GEN_ERR);
+
+    
+    user_info* user_status = (user_info*)malloc(REGISTERED_USERS*sizeof(user_info));
+    if(!user_status)
+        errorHandler(MALLOC_ERR);
+    memcpy(user_status, shmem, REGISTERED_USERS*sizeof(user_info));
+
+    if(sem_post(sem_id) < 0)
+        errorHandler(GEN_ERR);
+    if(sem_close(sem_id) < 0)
+        errorHandler(GEN_ERR);
+    return user_status;
+}
+
+
 void initialize_user_info(user_info* user_status){
     user_status[0].username = "alice";
     user_status[0].socket_id = -1;
@@ -119,6 +138,70 @@ void initialize_user_info(user_info* user_status){
     user_status[4].socket_id = -1;
 }
 
+// ---------------------------------------------------------------------
+// FUNCTIONS of HANDLING REPLIES FOR CLIENTS
+// ---------------------------------------------------------------------
+
+int handle_chat_request(int comm_socket){
+    log("Chat request arrived");
+    return 0;    
+}
+
+
+int handle_get_online_users(int comm_socket_id){
+    int ret;
+    log("Get Online Users request arrived");
+    
+    /*
+    *     COMMAND_CODE | NUM_PAIRS | (USER_INDEX | LENGTH_USERNAME | USERNAME)*
+    */
+
+    unsigned char online_cmd = ONLINE_CMD;
+    user_info* user_datastore_copy = get_user_datastore_copy();
+    
+    //Need to calculato how much space to allocate and send (strings have variable length fields)
+    int total_space_to_allocate = 5;
+    int online_users = 0; //also num_pairs
+    int curr_position = 5; //For copying fields in the buffer
+    for(int i=0; i<REGISTERED_USERS; i++){
+        if(user_datastore_copy[i].socket_id != -1){
+            total_space_to_allocate += user_datastore_copy[i].username.length() + 8;
+            online_users++;
+        }
+    }
+
+    //Copy various fields in the reply msg
+    uchar* replyToSend = (uchar*)malloc(total_space_to_allocate);
+    if(!replyToSend)
+        errorHandler(MALLOC_ERR);
+    uint32_t online_users_to_send = htons(online_users);
+    memcpy(replyToSend, (void*)&online_cmd, sizeof(unsigned char));
+    memcpy(replyToSend+1, (void*)&online_users_to_send, sizeof(int));
+    for(int i=0; i<REGISTERED_USERS; i++){
+        if(user_datastore_copy[i].socket_id != -1){
+            int curr_username_length = user_datastore_copy[i].username.length();
+            uint32_t i_to_send = htons(i);
+            uint32_t curr_username_length_to_send = htons(curr_username_length);
+            
+            memcpy(replyToSend + curr_position, (void*)&i_to_send, sizeof(int));
+            memcpy(replyToSend + curr_position + 4, (void*)&curr_username_length_to_send, sizeof(int));
+            memcpy(replyToSend + curr_position + 8, (void*)user_datastore_copy[i].username.c_str(), curr_username_length);
+
+            curr_position = curr_position + 8 + curr_username_length;
+        }
+    }
+    string tmp = "Total length of buffer to send: " + curr_position;
+    cout << "Total length of buffer to send: " << curr_position << endl;
+    
+    BIO_dump_fp(stdout, (const char*)replyToSend, total_space_to_allocate);
+
+    ret = send(comm_socket_id, replyToSend, total_space_to_allocate, 0);
+    if(ret < 0 || ret!=total_space_to_allocate)
+        errorHandler(SEND_ERR);
+    return 0;    
+}
+
+
 
 int main()
 {
@@ -126,7 +209,7 @@ int main()
     user_info user_status[REGISTERED_USERS];
     initialize_user_info(user_status);
     memcpy(shmem, user_status, sizeof(user_info)*REGISTERED_USERS);
-
+    
     int ret;
     int listen_socket_id, comm_socket_id;   //socket indexes
     struct sockaddr_in srv_addr, cl_addr;   //address informations struct
@@ -138,6 +221,8 @@ int main()
     listen_socket_id = socket(AF_INET, SOCK_STREAM, 0);
     if (listen_socket_id == -1)
         errorHandler(SOCK_ERR);
+    int option = 1;
+    setsockopt(listen_socket_id, SOL_SOCKET, SO_REUSEADDR, &option, sizeof(option));
 
     srv_addr.sin_family = AF_INET;
     srv_addr.sin_port = htons(srv_port);
@@ -171,8 +256,8 @@ int main()
             //Child process
             while (true)
             {
-                char msgOpcode;
-                
+                uchar msgOpcode;
+
                 //Get Opcode
                 ret = recv(comm_socket_id, (void *)&msgOpcode, sizeof(char), 0);
                 if (ret < 0)
@@ -180,11 +265,7 @@ int main()
                 if (ret = 0)
                     vlog("No message from the server");
 
-                string tmp(1, msgOpcode);
-                log("Msg received is " + tmp);
-                
                 switch (msgOpcode){
-
                     case CHAT_CMD:
                         ret = handle_chat_request(comm_socket_id);
                         if(ret<0)
@@ -192,7 +273,7 @@ int main()
                         break;
 
                     case ONLINE_CMD:
-                        ret = get_online_users();
+                        ret = handle_get_online_users(comm_socket_id);
                         if(ret<0)
                             errorHandler(GEN_ERR);
                         break;
