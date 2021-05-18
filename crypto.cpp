@@ -158,19 +158,6 @@ int aes_128_cbc_decrypt(uchar **plaintext, int ciphertext_len, uchar *key, uchar
 }
 
 
-/**
- * @brief aes gcm mac encrypt
- * 
- * @param plaintext input
- * @param plaintext_len input
- * @param aad input
- * @param aad_len input
- * @param key input
- * @param tag ouput
- * @param iv output
- * @param ciphertext output
- * @return ciphertext lenght, 0 on error
- */
 int aes_gcm_encrypt( uchar *plaintext, int plaintext_len, uchar* aad, uint aad_len, uchar *key, uchar** tag,
                     uchar **iv,  uchar **ciphertext){
     const EVP_CIPHER *cypher=AUTH_ENCRYPT_DEFAULT;
@@ -258,19 +245,7 @@ int aes_gcm_encrypt( uchar *plaintext, int plaintext_len, uchar* aad, uint aad_l
     return ciphertext_len;
 }
 
-/**
- * @brief aes gcm mac decrypt
- * 
- * @param ciphertext input
- * @param ciphertext_len input
- * @param aad input
- * @param aad_len input
- * @param key input
- * @param tag input
- * @param iv input
- * @param plaintext output
- * @return plaintext lenght, 0 on error
- */
+
 int aes_gcm_decrypt(uchar *ciphertext, uint ciphertext_len, uchar* aad, uint aad_len, uchar *key, uchar* tag,
                     uchar *iv,  uchar **plaintext){
     const EVP_CIPHER *cypher=AUTH_ENCRYPT_DEFAULT;
@@ -338,15 +313,7 @@ int aes_gcm_decrypt(uchar *ciphertext, uint ciphertext_len, uchar* aad, uint aad
     return plaintext_len;    
 }
 
-/**
- * @brief digest computation
- * 
- * @param cypher input
- * @param plaintext input
- * @param plaintext_len input
- * @param ciphertext output
- * @return digest length, 0 on error
- */
+
 uint digest(const EVP_MD* cypher, uchar* plaintext, uint plaintext_len, uchar** ciphertext){
 
     if(plaintext_len>BUFFER_MAX){
@@ -400,6 +367,17 @@ uint sha_256_digest(uchar* plaintext, uint plaintext_len, uchar** chipertext){
     return digest(EVP_sha256(), plaintext, plaintext_len, chipertext);
 }
 
+int serialize_certificate(FILE* cert_file, uchar** certificate){
+
+    *certificate=nullptr;
+    if(!cert_file){ cerr << "Error: cannot open certificate file (missing?)\n"; return 0; }
+    X509* cert = PEM_read_X509(cert_file, NULL, NULL, NULL);
+    fclose(cert_file);
+    if(!cert){ cerr << "Error: PEM_read_X509 returned NULL\n"; return 0;  }
+    int ret=i2d_X509(cert, certificate);
+    X509_free(cert);
+    return ret;
+}
 
 /**
  * @brief verify a certificate with a self signed CA certificate and ctrl
@@ -475,7 +453,8 @@ int verify_sign_pubkey(uchar* signature, uint sign_lenght, uchar* document, uint
         
     // deserialiaze public key
     BIO* mbio = BIO_new(BIO_s_mem());
-    BIO_write(mbio, pubkey, key_lenght);
+    if(!mbio){ cerr << "Error: cannot initialize BIO\n"; return 0;  }
+    if(!BIO_write(mbio, pubkey, key_lenght)){   cerr << "Error: cannot use BIO\n"; return 0; }
     EVP_PKEY* pkey=PEM_read_bio_PUBKEY(mbio, NULL, NULL, NULL);
     BIO_free(mbio);
 
@@ -483,6 +462,17 @@ int verify_sign_pubkey(uchar* signature, uint sign_lenght, uchar* document, uint
     EVP_PKEY_free(pkey);
 
     return ret;
+}
+
+int verify_sign_pubkey(uchar* signature, uint sign_lenght, uchar* document, uint doc_lenght, 
+    FILE*pubkey){
+
+    EVP_PKEY* pkey=PEM_read_PUBKEY(pubkey,NULL,NULL,NULL) ;     
+    int ret=_verify_sing_pubkey(signature, sign_lenght,document, doc_lenght, pkey );
+    EVP_PKEY_free(pkey);
+
+    return ret;
+
 }
 
 int verify_sign_cert(const uchar* certificate, const uint cert_lenght,  FILE* const CAcertificate,  
@@ -525,32 +515,78 @@ int verify_sign_cert(const uchar* certificate, const uint cert_lenght,  FILE* co
     X509_free(cert);
     return ret;
 }
+
+int sign_document( const uchar* document, uint doc_lenght, FILE* const priv_key,uchar** signature, uint* sign_lenght){
+    if(!priv_key){ cerr << "Error: cannot open private key file  (missing?)\n"; return 0; }
+    EVP_PKEY* prvkey = PEM_read_PrivateKey(priv_key, NULL, NULL, NULL);
+    fclose(priv_key);
+    if(!prvkey){ cerr << "Error: PEM_read_PrivateKey returned NULL\n"; return 0; }
+    if(!document || doc_lenght==0) { cerr << "Error: no document \n"; EVP_PKEY_free(prvkey);return 0; }
+
+    // declare some useful variables:
+    int ret;
+    const EVP_MD* md = DIEGST_DEFAULT;
+
+    // create the signature context:
+    EVP_MD_CTX* md_ctx = EVP_MD_CTX_new();
+    if(!md_ctx){ cerr << "Error: EVP_MD_CTX_new returned NULL\n"; EVP_PKEY_free(prvkey);return 0; }
+
+    // allocate buffer for signature:
+    *signature = (unsigned char*)malloc(EVP_PKEY_size(prvkey));
+    if(!*signature) { cerr << "Error: malloc returned NULL (signature too big?)\n";EVP_PKEY_free(prvkey);return 0; }
+
+    // sign the plaintext:
+    // (perform a single update on the whole plaintext, 
+    // assuming that the plaintext is not huge)
+    ret = EVP_SignInit(md_ctx, md);
+    if(ret == 0){ cerr << "Error: EVP_SignInit returned " << ret << "\n"; EVP_PKEY_free(prvkey);return 0; }
+    ret = EVP_SignUpdate(md_ctx, document, doc_lenght);
+    if(ret == 0){ cerr << "Error: EVP_SignUpdate returned " << ret << "\n"; EVP_PKEY_free(prvkey);return 0; }
+    ret = EVP_SignFinal(md_ctx, *signature, sign_lenght, prvkey);
+    if(ret == 0){ cerr << "Error: EVP_SignFinal returned " << ret << "\n";EVP_PKEY_free(prvkey);return 0; }
+
+    // delete the digest and the private key from memory:
+    EVP_MD_CTX_free(md_ctx);
+    EVP_PKEY_free(prvkey);
+    return 1;
+}
+
+
 // it's possible to permfor encryption/decryption without direct calling openSSL library
 /*
-int main(){
-    cout <<"test";
+int main(int argc, char* argv[]){
     string cacert_file_name="certification/SuperHakerCA_cert.pem";
     FILE* cacert_file = fopen(cacert_file_name.c_str(), "r");
-    
     string crl_file_name="certification/SuperHakerCA_crl.pem";
     FILE* crl_file = fopen(crl_file_name.c_str(), "r");
     string cert_file_name="certification/SecureCom_cert.pem";
     FILE* cert_file = fopen(cert_file_name.c_str(), "r");
-    
-    X509* verified_cert;
-    if(verify_certificate(cert_file, cacert_file, crl_file,&verified_cert )){
-        char* tmp = X509_NAME_oneline(X509_get_subject_name(verified_cert), NULL, 0);
-        char* tmp2 = X509_NAME_oneline(X509_get_issuer_name(verified_cert), NULL, 0);
-        cout << "Certificate of \"" << tmp << "\" (released by \"" << tmp2 << "\") verified successfully\n";
-        free(tmp);
-        free(tmp2);
-        cout <<"test";
-    }
-    X509_free(verified_cert);
+    string pkey_file="certification/SecureCom_key.pem";
+    FILE* privk_file=fopen(pkey_file.c_str(), "r");
    
+    uchar* certificate;
+    uint cert_len;
+    uchar docuemnt  [] ="ABCD1234PLAINTEXT!!";
+    uint doc_size=strlen((char*)docuemnt)+1;
+    uchar* sign;
+    uint sign_len;
+    
+    if(sign_document(docuemnt, doc_size, privk_file, &sign, &sign_len)){
+        
+        cert_len=serialize_certificate(cert_file, &certificate);
+        
+        if(cert_len!=0 && verify_sign_cert(
+            certificate, cert_len, cacert_file, crl_file, sign, sign_len, docuemnt, doc_size)){
+            cout <<"ok";
+        }
 
+        free(certificate);
+        free(sign);
+    }
+    return 0;
+    
 }
-*/
+
 /*
 int main(){
 
