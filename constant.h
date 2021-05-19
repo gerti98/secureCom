@@ -16,7 +16,11 @@
 #define CLOSE_ERR   0x08
 #define FORK_ERR    0x09
 #define INT_OW_ERR  0x0A
-#define BUFFER_MAX  102400
+#define SEM_OPEN_ERR     0x0B
+#define SEM_WAIT_ERR     0x0C
+#define SEM_POST_ERR     0x0D
+#define SEM_CLOSE_ERR     0x0E
+#define MMAP_ERR    0x0F
 
 /*
  *  COMMAND CODE
@@ -38,7 +42,7 @@
  *  vvlog   |   3
 */
 
-#define VERBOSITY_LEVEL 1
+#define VERBOSITY_LEVEL 3
 
 
 /**************************
@@ -48,6 +52,7 @@
 #define SOCKET_QUEUE 10
 #define REGISTERED_USERS 5
 #define MAX_USERNAME_SIZE 16
+#define BUFFER_MAX  102400
 
 /**************************
 *   CRYPTO CONSTANTS
