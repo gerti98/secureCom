@@ -47,6 +47,7 @@
 
 #define SOCKET_QUEUE 10
 #define REGISTERED_USERS 5
+#define MAX_USERNAME_SIZE 16
 
 /**************************
 *   CRYPTO CONSTANTS
