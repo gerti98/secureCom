@@ -11,6 +11,15 @@
 #include "constant.h"
 #include "util.h"
 
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <openssl/evp.h>
+#include <openssl/pem.h>
+#include <openssl/x509.h>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+
+
 using namespace std;
 
 /* This global variable is setted to true if the user is in chat with 
@@ -23,7 +32,6 @@ struct commandMSG
     uint8_t opcode;
     int userId;
 };
-size_t CMD_STRUCT_SIZE = sizeof(uint8_t)+sizeof(int);
 
 struct genericMSG
 {
@@ -31,7 +39,6 @@ struct genericMSG
     uint16_t length;
     unsigned char* payload;
 };
-size_t GEN_STRUCT_SIZE =  sizeof(uint8_t) + sizeof(uint16_t) + sizeof(unsigned char*);
 
 struct user
 {
@@ -39,7 +46,6 @@ struct user
     unsigned char* username;
     user* next;
 };
-size_t USER_STRUCT_SIZE =  sizeof(int) + sizeof(unsigned char*) + sizeof(user*);
 
 void welcome()
 {
@@ -78,15 +84,11 @@ uint8_t commandStringHandler(string cmd)
 int chat(struct commandMSG* toSend)
 {
     toSend->opcode = CHAT_CMD; 
-    string username;
-    cout << " Work in progress - chat()" << endl;
     cout << " Write the username of the user that you want to contact" << endl;
     printf(" > ");
-    cin >> username;
-    // Salvo la stringa e la mando al server
+    cin >> toSend->userId;
     return 0;
 }
-
 
 void free_list_users(struct user* userlist)
 {
@@ -180,6 +182,21 @@ void print_list_users(struct user* userlist)
 }
 */
 
+int send_command_to_server(int sock_id, commandMSG* cmdToSend)
+{
+    int ret = send(sock_id,(void*)&cmdToSend->opcode, sizeof(uint8_t), 0);
+    if(ret < 0 || ret!=sizeof(uint8_t))
+        return -1;
+                
+    if(cmdToSend->opcode==CHAT_CMD)
+    {
+        ret = send(sock_id,(void*)&cmdToSend->userId, sizeof(int), 0);
+        if(ret < 0 || ret!=sizeof(int))
+            return -1;
+    }
+    return 0;
+}
+
 
 int main(int argc, char* argv[])
 {
@@ -227,24 +244,28 @@ int main(int argc, char* argv[])
 
         uint8_t commandCode = NOT_VALID_CMD;
         struct genericMSG msgGenToSend;
-        struct commandMSG toSend;
+        msgGenToSend.opcode = MSG;
+        msgGenToSend.payload = NULL;
+        msgGenToSend.length = 0;
+
+        struct commandMSG cmdToSend;
+        cmdToSend.opcode = NOT_VALID_CMD;
+        cmdToSend.userId = 0;
 
         if(!isChatting)
         {
-            toSend.opcode = NOT_VALID_CMD;
-
             commandCode = commandStringHandler(userInput);
 
             switch (commandCode)
             {
             case CHAT_CMD:
-                ret = chat(&toSend);
+                ret = chat(&cmdToSend);
                 if(ret<0)
                     errorHandler(GEN_ERR);
                 break;
 
             case ONLINE_CMD:
-                toSend.opcode = ONLINE_CMD;
+                cmdToSend.opcode = ONLINE_CMD;
                 break;
             
             case HELP_CMD:
@@ -253,7 +274,7 @@ int main(int argc, char* argv[])
 
             case EXIT_CMD:
                 // The command is handled at the end of the while body
-                toSend.opcode = EXIT_CMD;
+                cmdToSend.opcode = EXIT_CMD;
                 break;
             
             case NOT_VALID_CMD:
@@ -268,37 +289,29 @@ int main(int argc, char* argv[])
         else
         {
             commandCode = MSG;
-            msgGenToSend.opcode = commandCode;
-            msgGenToSend.payload = NULL;
-            msgGenToSend.length = 0;
+            // Management of the message chat
         }
 
         if(commandCode!=HELP_CMD) // I have to send nothing to the server if the command is help
         {
             if(isChatting)
             {
-                // Set the length of the message
-                //len = sizeof(msgGenToSend);
-                uint16_t lmsg = htons(GEN_STRUCT_SIZE);
-                msgGenToSend.length = lmsg;
-
-                // Send the message to the server
-                ret = send(sock_id,(void*)&msgGenToSend,sizeof(msgGenToSend),0);
-                if(ret < 0 || ret!=sizeof(msgGenToSend))
-                    errorHandler(SEND_ERR);
+                cout << " Work in progress - Management of chat " << endl;
+                /*
+                 *  WORKING IN PROGRESS
+                 */
             }
             else
             {
                 // Send the command message to the server
-                cout << "Sent " << CMD_STRUCT_SIZE << endl;
-                ret = send(sock_id,(void*)&toSend,CMD_STRUCT_SIZE,0);
-                
-                if(ret < 0 || ret!=CMD_STRUCT_SIZE)
+                cout << " DBG - I have to sent a command message to the server ... " << endl;
+                ret = send_command_to_server(sock_id, &cmdToSend);
+                if(ret!=0)
                     errorHandler(SEND_ERR);
+                cout << " DBG - Command to server sent" << endl;
             }
 
-            printf(" DBb - wait for server response\n");
-            // Wait for response
+            printf(" DBG - wait for server response\n");
 
             // I read the first byte to understand which type of message the server is sending to me
             uint8_t op;

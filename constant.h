@@ -25,12 +25,17 @@
 /*
  *  COMMAND CODE
  */
-#define NOT_VALID_CMD   0x1
-#define EXIT_CMD        0x2
-#define ONLINE_CMD      0x3
-#define CHAT_CMD        0x4
-#define HELP_CMD        0x5
-#define MSG             0x6
+#define NOT_VALID_CMD   0x01
+#define EXIT_CMD        0x02
+#define ONLINE_CMD      0x03
+#define CHAT_CMD        0x04
+#define HELP_CMD        0x05
+#define MSG             0x06
+
+/*
+ *  SIZE COSTANT
+ */
+#define MAX_USERNAME_SIZE   16 
 
 /*
  *  LOGGING CONSTANTS
@@ -51,7 +56,6 @@
 
 #define SOCKET_QUEUE 10
 #define REGISTERED_USERS 5
-#define MAX_USERNAME_SIZE 16
 #define BUFFER_MAX  102400
 
 /**************************

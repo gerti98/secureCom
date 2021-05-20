@@ -150,8 +150,18 @@ void initialize_user_info(user_info* user_status){
  *  Handle the response to the client for the !chat command
  *  @return 0 in case of success, -1 in case of error
  */
-int handle_chat_request(int comm_socket){
+int handle_chat_request(int comm_socket_id){
     log("CHAT opcode arrived");
+    // Consuming the receiving buffer
+    int user_id;
+    int ret = recv(comm_socket_id, (void *)&user_id, sizeof(int), 0);
+
+    if (ret < 0)
+        errorHandler(REC_ERR);
+    if (ret = 0)
+        vlog("No message from the server");
+    
+    cout << "Request for chatting with user id " << user_id << " arrived " << endl;
     /*
     *    Work in progress
     */
@@ -290,13 +300,16 @@ int main()
             while (true)
             {
                 uchar msgOpcode;
-
+                
                 //Get Opcode from the client
                 ret = recv(comm_socket_id, (void *)&msgOpcode, sizeof(char), 0);
+
                 if (ret < 0)
                     errorHandler(REC_ERR);
                 if (ret = 0)
                     vlog("No message from the server");
+           
+                printf("The ocpode arrived is: %x\n",msgOpcode);
 
                 //Demultiplexing of opcode
                 switch (msgOpcode){
