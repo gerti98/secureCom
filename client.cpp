@@ -11,14 +11,6 @@
 #include "constant.h"
 #include "util.h"
 
-#include <arpa/inet.h>
-#include <sys/socket.h>
-#include <openssl/evp.h>
-#include <openssl/pem.h>
-#include <openssl/x509.h>
-#include <openssl/ssl.h>
-#include <openssl/err.h>
-
 
 using namespace std;
 
@@ -135,12 +127,12 @@ void free_list_users(struct user* userlist)
  * @param userlist data structure to store the list
  * @return The number of online users, -1 if error, 0 if no user in the list
  */
-int retrieveOnlineUsers(int sock_id, user* user_list)
+int retrieveOnlineUsers(int sock_id, user*& user_list)
 {
     unsigned int howMany;
     int ret = recv(sock_id, (void*)&howMany, sizeof(int), 0);  
     howMany = ntohl(howMany);
-    cout << " Number of users: " << howMany << endl;
+    cout << " DBG - Number of users: " << howMany << endl;
     
     if(ret <= 0)
         return -1;
@@ -151,12 +143,12 @@ int retrieveOnlineUsers(int sock_id, user* user_list)
     if(howMany>REGISTERED_USERS)
         return -1;
   
-    //struct user* user_list = NULL; //
     struct user* current = NULL;
     struct user* tmp = NULL;
 
     for(int i = 0; i<howMany; i++)
     {
+        cout << " DBG - i: " << i << endl;
         int username_size;
         tmp = (struct user*)malloc(sizeof(user));
 
@@ -166,12 +158,12 @@ int retrieveOnlineUsers(int sock_id, user* user_list)
             return -1;
         }
         tmp->username = NULL;
-        tmp->userId = 0;
+        tmp->userId = -1;
         tmp->next = NULL;
 
         ret = recv(sock_id, (void*)&(tmp->userId), sizeof(int), 0);  
         tmp->userId = ntohl(tmp->userId);
-        cout << " User id: " << tmp->userId << endl;
+        cout << " DBG - User id: " << tmp->userId << endl;
         if(ret <= 0)
         {
             free(tmp);
@@ -181,7 +173,7 @@ int retrieveOnlineUsers(int sock_id, user* user_list)
 
         ret = recv(sock_id, (void*)&username_size, sizeof(int), 0);  
         username_size = ntohl(username_size);
-        cout << " Username size: " << username_size << endl;
+        cout << " DBG - Username size: " << username_size << endl;
         if(ret <= 0)
         {
             free(tmp);
@@ -206,14 +198,15 @@ int retrieveOnlineUsers(int sock_id, user* user_list)
         }
         
         tmp->username[username_size] = '\0';
-        cout << " Username: " << tmp->username << endl;
+        cout << " DBG - Username: " << tmp->username << endl;
         if(i==0)
             user_list = tmp;
         else
             current->next = tmp;
-    
+        
         current = tmp;    
     }
+
     return howMany;
 }
 
@@ -228,15 +221,20 @@ int print_list_users(user* userlist)
 {
     //cout << "print_list_users" << endl; 
     if(userlist==NULL)
+    {
+        cout << " Warning: userlist is null " << endl;
         return -1;
-
+    }
 
     struct user* tmp = userlist;
+    cout << " **** USER LIST **** " << endl;
+    cout << "  ID \t Username" << endl;
     while(tmp!=NULL)
     {
-        cout << tmp->userId << "\t" << tmp->username << endl;
+        cout << "  " << tmp->userId << " \t " << tmp->username << endl;
         tmp = tmp->next;
     }
+    cout << " ****************** " << endl;
 
     return 0;
 }
@@ -316,7 +314,7 @@ int main(int argc, char* argv[])
 
         struct commandMSG cmdToSend;
         cmdToSend.opcode = NOT_VALID_CMD;
-        cmdToSend.userId = 0;
+        cmdToSend.userId = -1;
 
         if(!isChatting)
         {
@@ -380,7 +378,7 @@ int main(int argc, char* argv[])
                 cout << " DBG - Command to server sent" << endl;
             }
 
-            printf(" DBG - wait for server response\n");
+            cout << " DBG - wait for server response" << endl;
 
             // I read the first byte to understand which type of message the server is sending to me
             uint8_t op;
@@ -392,13 +390,12 @@ int main(int argc, char* argv[])
 
             if(op==ONLINE_CMD)
             {
-                cout << "Online users command handling" << endl;
+                cout << " DBG - Online users command handling" << endl;
                 user* user_list = NULL;
             
                 ret = retrieveOnlineUsers(sock_id, user_list);
-            
                 if(ret == 0)
-                    cout << "No users are online" << endl;
+                    cout << " ** No users are online ** " << endl;
                 else if (ret==-1)
                     errorHandler(GEN_ERR);
                 else // correct output
@@ -409,7 +406,7 @@ int main(int argc, char* argv[])
             }
             else
             {
-                cout << " Work in progress " << endl;
+                cout << " DBG - Work in progress " << endl;
             }
     
             if(commandCode==EXIT_CMD)

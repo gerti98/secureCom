@@ -29,7 +29,7 @@ void errorHandler(uint16_t errorId = GEN_ERR)
     switch (errorId)
     {
         case GEN_ERR:
-            perror("Generic Error\n");
+            printf("Generic Error\n");
             break;
 
         case CONN_ERR:
@@ -69,7 +69,7 @@ void errorHandler(uint16_t errorId = GEN_ERR)
             break;
             
         default:
-            perror("Generic Error\n");
+            printf("Generic Error\n");
             break;
     }
 
