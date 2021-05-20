@@ -158,7 +158,7 @@ int handle_chat_request(int comm_socket_id){
 
     if (ret < 0)
         errorHandler(REC_ERR);
-    if (ret = 0)
+    if (ret == 0)
         vlog("No message from the server");
     
     cout << "Request for chatting with user id " << user_id << " arrived " << endl;
@@ -306,7 +306,7 @@ int main()
 
                 if (ret < 0)
                     errorHandler(REC_ERR);
-                if (ret = 0)
+                if (ret == 0)
                     vlog("No message from the server");
            
                 printf("The ocpode arrived is: %x\n",msgOpcode);
