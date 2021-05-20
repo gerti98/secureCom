@@ -54,5 +54,5 @@
 #define DIEGST_DEFAULT EVP_sha256();
 #define SYMMETRIC_DEFAULT EVP_aes_256_cbc();
 #define AUTH_ENCRYPT_DEFAULT EVP_aes_256_gcm();
-
+#define NUANCE_DEFAULT 32;
 #endif
