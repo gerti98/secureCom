@@ -140,7 +140,7 @@ int retrieveOnlineUsers(int sock_id, user* user_list)
     unsigned int howMany;
     int ret = recv(sock_id, (void*)&howMany, sizeof(int), 0);  
     howMany = ntohl(howMany);
-    //cout << " Number of users: " << howMany << endl;
+    cout << " Number of users: " << howMany << endl;
     
     if(ret <= 0)
         return -1;
@@ -151,7 +151,7 @@ int retrieveOnlineUsers(int sock_id, user* user_list)
     if(howMany>REGISTERED_USERS)
         return -1;
   
-    struct user* user_list = NULL; //
+    //struct user* user_list = NULL; //
     struct user* current = NULL;
     struct user* tmp = NULL;
 
@@ -171,7 +171,7 @@ int retrieveOnlineUsers(int sock_id, user* user_list)
 
         ret = recv(sock_id, (void*)&(tmp->userId), sizeof(int), 0);  
         tmp->userId = ntohl(tmp->userId);
-        //cout << " User id: " << tmp->userId << endl;
+        cout << " User id: " << tmp->userId << endl;
         if(ret <= 0)
         {
             free(tmp);
@@ -181,7 +181,7 @@ int retrieveOnlineUsers(int sock_id, user* user_list)
 
         ret = recv(sock_id, (void*)&username_size, sizeof(int), 0);  
         username_size = ntohl(username_size);
-        //cout << " Username size: " << username_size << endl;
+        cout << " Username size: " << username_size << endl;
         if(ret <= 0)
         {
             free(tmp);
@@ -206,7 +206,7 @@ int retrieveOnlineUsers(int sock_id, user* user_list)
         }
         
         tmp->username[username_size] = '\0';
-        //cout << " Username: " << tmp->username << endl;
+        cout << " Username: " << tmp->username << endl;
         if(i==0)
             user_list = tmp;
         else
