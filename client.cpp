@@ -135,11 +135,13 @@ void free_list_users(struct user* userlist)
  * @param userlist data structure to store the list
  * @return The number of online users, -1 if error, 0 if no user in the list
  */
-int retrieveOnlineUsers(int sock_id, user* userlist)
+int retrieveOnlineUsers(int sock_id, user* user_list)
 {
-    int howMany;
+    unsigned int howMany;
     int ret = recv(sock_id, (void*)&howMany, sizeof(int), 0);  
-     cout << " Number of users: " << howMany << endl;
+    howMany = ntohl(howMany);
+    //cout << " Number of users: " << howMany << endl;
+    
     if(ret <= 0)
         return -1;
 
@@ -149,7 +151,7 @@ int retrieveOnlineUsers(int sock_id, user* userlist)
     if(howMany>REGISTERED_USERS)
         return -1;
   
-    struct user* user_list = NULL;
+    struct user* user_list = NULL; //
     struct user* current = NULL;
     struct user* tmp = NULL;
 
@@ -168,6 +170,8 @@ int retrieveOnlineUsers(int sock_id, user* userlist)
         tmp->next = NULL;
 
         ret = recv(sock_id, (void*)&(tmp->userId), sizeof(int), 0);  
+        tmp->userId = ntohl(tmp->userId);
+        //cout << " User id: " << tmp->userId << endl;
         if(ret <= 0)
         {
             free(tmp);
@@ -176,6 +180,8 @@ int retrieveOnlineUsers(int sock_id, user* userlist)
         }
 
         ret = recv(sock_id, (void*)&username_size, sizeof(int), 0);  
+        username_size = ntohl(username_size);
+        //cout << " Username size: " << username_size << endl;
         if(ret <= 0)
         {
             free(tmp);
@@ -191,17 +197,16 @@ int retrieveOnlineUsers(int sock_id, user* userlist)
         }
 
         tmp->username = (unsigned char*)malloc(username_size+1);
-
-        ret = recv(sock_id, (void*)&(tmp->username), username_size, 0);  
+        ret = recv(sock_id, (void*)(tmp->username), username_size, 0);  
         if(ret <= 0)
         {   
             free(tmp);
             free_list_users(user_list);
             return -1;
         }
-
+        
         tmp->username[username_size] = '\0';
-
+        //cout << " Username: " << tmp->username << endl;
         if(i==0)
             user_list = tmp;
         else
@@ -221,8 +226,10 @@ int retrieveOnlineUsers(int sock_id, user* userlist)
  */
 int print_list_users(user* userlist)
 {
+    //cout << "print_list_users" << endl; 
     if(userlist==NULL)
         return -1;
+
 
     struct user* tmp = userlist;
     while(tmp!=NULL)

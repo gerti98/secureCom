@@ -204,7 +204,7 @@ int handle_get_online_users(int comm_socket_id){
     uchar* replyToSend = (uchar*)malloc(total_space_to_allocate);
     if(!replyToSend)
         errorHandler(MALLOC_ERR);
-    uint32_t online_users_to_send = htons(online_users);
+    uint32_t online_users_to_send = htonl(online_users);
     
     //Copy OPCODE and NUM_PAIRS
     memcpy(replyToSend, (void*)&online_cmd, sizeof(unsigned char));
@@ -215,8 +215,8 @@ int handle_get_online_users(int comm_socket_id){
         //Copy ID, USERNAME_LENGTH and USERNAME for online users
         if(user_datastore_copy[i].socket_id != -1){
             int curr_username_length = user_datastore_copy[i].username.length();
-            uint32_t i_to_send = htons(i);
-            uint32_t curr_username_length_to_send = htons(curr_username_length);
+            uint32_t i_to_send = htonl(i);
+            uint32_t curr_username_length_to_send = htonl(curr_username_length);
             
             memcpy(replyToSend + curr_position, (void*)&i_to_send, sizeof(int));
             memcpy(replyToSend + curr_position + 4, (void*)&curr_username_length_to_send, sizeof(int));
@@ -249,7 +249,8 @@ int main()
     user_info user_status[REGISTERED_USERS];
     initialize_user_info(user_status);
     memcpy(shmem, user_status, sizeof(user_info)*REGISTERED_USERS);
-    
+    set_user_socket("alice", 100); //to test the client
+
     int ret;
     int listen_socket_id, comm_socket_id;   //socket indexes
     struct sockaddr_in srv_addr, cl_addr;   //address informations
