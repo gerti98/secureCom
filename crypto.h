@@ -143,4 +143,34 @@ int verify_sign_cert(const uchar* certificate, const uint cert_lenght,  FILE* co
  * @return 1 if successful, 0 otherwise 
  */
 int sign_document( const uchar* document, uint doc_lenght, FILE* const priv_key,uchar** signature, uint* sign_lenght);
+
+/**
+ * @brief generate a random sequence 
+ * 
+ * @param lenght number of random bytes
+ * @param nuance output
+ * @return 1 on succes, 0 otherwise
+ */
+int random_generate(const uint lenght, uchar** nuance);
+
+/**
+ * @brief generate a pair of DH ephimeral key for key establishemnt
+ * 
+ * @param privkey output (NO SERIALIZED)
+ * @param pubkey output (serialized)
+ * @param pubkey_len 
+ * @return 1 on succes, 0 otherwise
+ */
+int eph_key_generate(void** privkey, uchar** pubkey, uint* pubkey_len );
+
+/**
+ * @brief derive the shared seceret from a pair fo DH keys
+ * 
+ * @param privkey input (NO SERIALIZED)
+ * @param peer_key input (serialized)
+ * @param peer_key_len input
+ * @param secret output shred secret
+ * @return shared secret lenght, 0 on error(s) 
+ */
+uint derive_secret(void* privkey, uchar* peer_key, uint peer_key_len , uchar** secret );
 #endif

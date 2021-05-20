@@ -551,7 +551,142 @@ int sign_document( const uchar* document, uint doc_lenght, FILE* const priv_key,
     return 1;
 }
 
+// print a key, useful for debug
+void print_key(EVP_PKEY* key){
+    BIO *bp = BIO_new_fp(stdout, BIO_NOCLOSE);
+    EVP_PKEY_print_public(bp, key, 1, NULL);
+    BIO_free(bp);
+}
 
+uint serialize_pubkey(EVP_PKEY* pubkey, uchar** pubkey_ser){
+    
+    BIO* mbio= BIO_new(BIO_s_mem());
+    if(!mbio){ cerr << "Error: cannot initialize BIO\n"; return 0;  }
+    if(!PEM_write_bio_PUBKEY(mbio, pubkey)){cerr << "Error: unable to write in BIO\n"; return 0; }
+    uchar* tmp=NULL;
+
+    // obtain size and allocate buffer
+    int ret= BIO_get_mem_data(mbio,&tmp);
+    *pubkey_ser=(uchar*)malloc(ret);
+    if(*pubkey_ser==NULL){ cerr << "unable to allocate buffer for serialized pubkey\n"; return 0;  }
+    
+    memcpy(*pubkey_ser, tmp, ret);
+    BIO_free(mbio);
+    return ret;
+}
+
+int deserialize_pubkey(const uchar* pubkey_ser, uint key_lenght, EVP_PKEY** pubkey){
+    
+    BIO* mbio= BIO_new(BIO_s_mem());
+    if(!mbio){ cerr << "Error: cannot initialize BIO\n"; return 0;  }
+    if(! BIO_write(mbio, pubkey_ser, key_lenght)){cerr << "Error: unable to write in BIO\n"; return 0; }
+    *pubkey = PEM_read_bio_PUBKEY( mbio, NULL, NULL, NULL);
+    BIO_free(mbio);
+    if(*pubkey==nullptr) {cerr << "Error: bio read returned null\n"; return 0; }
+    return 1;
+}
+
+int eph_key_generate(void** privkey, uchar** pubkey, uint* pubkey_len ){
+
+    EVP_PKEY* dh_params = NULL;
+    EVP_PKEY* priv_key=NULL;
+    EVP_PKEY_CTX* pctx;
+
+    // using elliptic-curve
+    pctx = EVP_PKEY_CTX_new_id(EVP_PKEY_EC, NULL);
+    if(!pctx){cerr << "Error: unable to allocate EC generation context";return 0;}
+    if(!EVP_PKEY_paramgen_init(pctx)){cerr << "Error: unable to initialize EC parameters generation";return 0;};
+    EVP_PKEY_CTX_set_ec_paramgen_curve_nid(pctx, NID_X9_62_prime256v1);
+    if(!EVP_PKEY_paramgen(pctx, &dh_params)){cerr << "Error: unable to generate EC parameters";return 0;};
+    EVP_PKEY_CTX_free(pctx);
+
+    // using DH keys
+    EVP_PKEY_CTX* ctx=EVP_PKEY_CTX_new(dh_params, NULL);
+    if(!ctx){cerr << "Error: unable to allocate DH context";return 0;}
+    if(1!=EVP_PKEY_keygen_init(ctx)){cerr << "Error: unable to initialize DH context";return 0;}
+    if(1!=EVP_PKEY_keygen(ctx, &priv_key)){cerr << "Error: unable to generate DH keys";return 0;}
+    EVP_PKEY_CTX_free(ctx);
+    EVP_PKEY_free(dh_params);
+  
+
+    // serialize public key
+    *pubkey_len= serialize_pubkey(priv_key, pubkey);
+    if(!*pubkey){cerr << "Error: unable to serialize DH keys\n";return 0;}
+    *privkey=(void*) priv_key; 
+    
+    return 1;
+}
+
+uint derive_secret(void* privkey, uchar* peer_key, uint peer_key_len , uchar** secret ){
+    EVP_PKEY_CTX *derive_ctx;
+    size_t skeylen;
+
+    // deserialize keys
+    EVP_PKEY* priv_key=(EVP_PKEY*) privkey;
+    EVP_PKEY* peer_pubkey;
+
+    if(!deserialize_pubkey(peer_key, peer_key_len, &peer_pubkey))
+        {cerr << "Error: unable to deserialize peer key\n";return 0;}
+
+    // secret derivation
+    derive_ctx = EVP_PKEY_CTX_new(priv_key,NULL);
+    if (!derive_ctx) {cerr << "Error: unable to allocate DH derivation context";return 0;}
+    if (EVP_PKEY_derive_init(derive_ctx) <= 0) 
+        {cerr << "Error: unable to initialize DH derivation context";return 0;}
+    /*Setting the peer with its pubkey*/
+    if (EVP_PKEY_derive_set_peer(derive_ctx, peer_pubkey) <= 0) 
+        {cerr << "Error: unable to set peer public key";return 0;}
+    /* Determine buffer length, by performing a derivation but writing the result nowhere */
+    if(!EVP_PKEY_derive(derive_ctx, NULL, &skeylen))
+        {cerr << "Error: unable to derive DH secret buffer lenght";return 0;}   
+    /*allocate buffer for the shared secret*/
+    *secret = (uchar*)(malloc(int(skeylen)));
+    if (!*secret){cerr << "Error: unable to allocate DH secret buffer";return 0;}
+    /*Perform again the derivation and store it in skey buffer*/
+    if (EVP_PKEY_derive(derive_ctx, *secret, &skeylen) <= 0) 
+        {cerr << "Error: unable to derive DH secret";return 0;}
+    
+    //FREE EVERYTHING INVOLVED WITH THE EXCHANGE
+    EVP_PKEY_CTX_free(derive_ctx);
+    EVP_PKEY_free(peer_pubkey);
+    EVP_PKEY_free(priv_key);
+    return skeylen;
+}
+
+/*
+int main(int argc, char* argv[]){
+    uchar* skey_A;
+    uint skey_A_len;
+    uchar* skey_B;
+    uint skey_B_len;
+    uchar* pubkeyA;
+    uint pubkeyA_len;
+    uint pubkeyB_len;
+    uchar* pubkeyB;
+    void* privkeyA;
+    void* privkeyB;
+
+    if(!eph_key_generate(&privkeyA, &pubkeyA, &pubkeyA_len)){ cerr<<"ephimeral key generation A failed\n";}
+    if(!eph_key_generate(&privkeyB, &pubkeyB, &pubkeyB_len)){ cerr<<"ephimeral key generation B failed\n";}
+    
+    if(!(skey_A_len=derive_secret(privkeyA, pubkeyB, pubkeyB_len, &skey_A)))
+        { cerr<<"secret derivation A failed\n";}
+    if(!(skey_B_len=derive_secret(privkeyB, pubkeyA, pubkeyA_len, &skey_B)))
+        { cerr<<"secret derivation B failed\n";}
+
+    printf("Here it is A shared secret: \n");
+    BIO_dump_fp (stdout, (const char *)skey_A, skey_A_len);
+    printf("Here it is B shared secret: \n");
+    BIO_dump_fp (stdout, (const char *)skey_B, skey_B_len);
+    
+    free(pubkeyA);
+    free(pubkeyB);
+    free(skey_A);
+    free(skey_B);
+    printf("ok\n");
+
+}
+*/
 // it's possible to permfor encryption/decryption without direct calling openSSL library
 /*
 int main(int argc, char* argv[]){
