@@ -6,37 +6,11 @@
 using uchar=unsigned char;
 using namespace std;
 
-/**
- * @brief generic simmetric encryptioon function 
- * 
- * @param cypher input 
- * @param plaintext input 
- * @param plaintext_len input
- * @param key input
- * @param iv output
- * @param ciphertext output
- * @return ciphertext lenght, 0 on error
- */
-int sym_encrypt(const EVP_CIPHER *cypher, uchar *plaintext, int plaintext_len, uchar *key, uchar **iv,  uchar **ciphertext);
-
-/**
- * @brief generic simmetric decryptioon function 
- * 
- * @param cypher input 
- * @param plaintext output
- * @param ciphertext_len input
- * @param key input
- * @param iv input
- * @param ciphertext input
- * @return plaintext lenght, 0 on error
- */
-int sym_decrypt(const EVP_CIPHER *cypher, uchar **plaintext, int ciphertext_len, uchar *key, uchar *iv, uchar *ciphertext);
-
 int aes_128_cbc_encrypt(uchar *plaintext, int plaintext_len, uchar *key, uchar **iv, uchar **ciphertext);
 int aes_128_cbc_decrypt(uchar **plaintext, int ciphertext_len, uchar *key, uchar *iv, uchar *ciphertext);
 
 /**
- * @brief aes gcm mac decrypt
+ * @brief authenticated encryption decrypt
  * 
  * @param ciphertext input
  * @param ciphertext_len input
@@ -48,12 +22,12 @@ int aes_128_cbc_decrypt(uchar **plaintext, int ciphertext_len, uchar *key, uchar
  * @param plaintext output
  * @return plaintext lenght, 0 on error
  */
-int aes_gcm_decrypt(uchar *ciphertext, uint ciphertext_len, uchar* aad, uint aad_len, uchar *key, uchar* tag,
+int auth_enc_decrypt(uchar *ciphertext, uint ciphertext_len, uchar* aad, uint aad_len, uchar *key, uchar* tag,
                     uchar *iv,  uchar **plaintext);
 
 
 /**
- * @brief aes gcm mac encrypt
+ * @brief authenticated encryption encrypt
  * 
  * @param plaintext input
  * @param plaintext_len input
@@ -65,21 +39,28 @@ int aes_gcm_decrypt(uchar *ciphertext, uint ciphertext_len, uchar* aad, uint aad
  * @param ciphertext output
  * @return ciphertext lenght, 0 on error
  */
-int aes_gcm_encrypt( uchar *plaintext, int plaintext_len, uchar* aad, uint aad_len, uchar *key, uchar** tag,
+int auth_enc_encrypt( uchar *plaintext, int plaintext_len, uchar* aad, uint aad_len, uchar *key, uchar** tag,
                     uchar **iv,  uchar **ciphertext);
-                    
+
 /**
- * @brief digest computation
+ * @brief compare 2 digests (wrap the crypto memcompare)
  * 
- * @param cypher input
+ * @param digest1 
+ * @param digest2 
+ * @param len lenght of digests
+ * @return  0 if equals, 1 if differents
+ */
+uint digest_compare(const uchar* digest1, const uchar* digest2, const uint len);
+
+/**
+ * @brief compute a digest with the default cypher
+ * 
  * @param plaintext input
  * @param plaintext_len input
- * @param ciphertext output
- * @return digest length, 0 on error
+ * @param chipertext output
+ * @return digest lenght, 0 on error(s) 
  */
-uint digest(const EVP_MD* cypher, uchar* plaintext, uint plaintext_len, uchar** ciphertext);
-
-uint sha_256_digest(uchar* plaintext, uint plaintext_len, uchar** chipertext);
+uint default_digest(uchar* plaintext, uint plaintext_len, uchar** chipertext);
 
 /**
  * @brief serialize a certificate
@@ -104,7 +85,7 @@ int serialize_certificate(FILE* cert_file, uchar** certificate);
 int verify_sign_pubkey(uchar* signature, uint sign_lenght, uchar* document, uint doc_lenght, uchar* pubkey, uint key_lenght);
 
 /**
- * @brief verify a signature on a docuemnt using the public key of the signer (passed as a file)
+ * @brief verify a signature on a docuemnt using the public key of the signer (passed as a PEM file)
  * 
  * @param signature input
  * @param sign_lenght input
@@ -121,8 +102,8 @@ int verify_sign_pubkey(uchar* signature, uint sign_lenght, uchar* document, uint
  * 
  * @param certificate input certificate of the signer
  * @param cert_lenght input lenght of the certificate of the signer
- * @param CAcertificate input certificate of the CA
- * @param CACtrl input
+ * @param CAcertificate input certificate of the CA (PEM)
+ * @param CACtrl input (PEM)
  * @param signature input
  * @param sign_lenght input
  * @param document input
@@ -148,10 +129,10 @@ int sign_document( const uchar* document, uint doc_lenght, FILE* const priv_key,
  * @brief generate a random sequence 
  * 
  * @param lenght number of random bytes
- * @param nuance output
+ * @param nuance output buffer (ha to be preallocated)
  * @return 1 on succes, 0 otherwise
  */
-int random_generate(const uint lenght, uchar** nuance);
+int random_generate(const uint lenght, uchar* nuance);
 
 /**
  * @brief generate a pair of DH ephimeral key for key establishemnt

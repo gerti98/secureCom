@@ -14,6 +14,18 @@ using uchar=unsigned char;
 using namespace std;
 
 
+
+/**
+ * @brief generic simmetric encryptioon function 
+ * 
+ * @param cypher input 
+ * @param plaintext input 
+ * @param plaintext_len input
+ * @param key input
+ * @param iv output
+ * @param ciphertext output
+ * @return ciphertext lenght, 0 on error
+ */
 int sym_encrypt(const EVP_CIPHER *cypher, uchar *plaintext, int plaintext_len, uchar *key, 
     uchar **iv,  uchar **ciphertext){
     
@@ -90,6 +102,17 @@ int sym_encrypt(const EVP_CIPHER *cypher, uchar *plaintext, int plaintext_len, u
 }
 
 
+/**
+ * @brief generic simmetric decryptioon function 
+ * 
+ * @param cypher input 
+ * @param plaintext output
+ * @param ciphertext_len input
+ * @param key input
+ * @param iv input
+ * @param ciphertext input
+ * @return plaintext lenght, 0 on error
+ */
 int sym_decrypt(const EVP_CIPHER *cypher, uchar **plaintext, int ciphertext_len, uchar *key, 
     uchar *iv, uchar *ciphertext){
 
@@ -158,7 +181,7 @@ int aes_128_cbc_decrypt(uchar **plaintext, int ciphertext_len, uchar *key, uchar
 }
 
 
-int aes_gcm_encrypt( uchar *plaintext, int plaintext_len, uchar* aad, uint aad_len, uchar *key, uchar** tag,
+int auth_enc_encrypt( uchar *plaintext, int plaintext_len, uchar* aad, uint aad_len, uchar *key, uchar** tag,
                     uchar **iv,  uchar **ciphertext){
     const EVP_CIPHER *cypher=AUTH_ENCRYPT_DEFAULT;
     EVP_CIPHER_CTX *ctx;
@@ -246,7 +269,7 @@ int aes_gcm_encrypt( uchar *plaintext, int plaintext_len, uchar* aad, uint aad_l
 }
 
 
-int aes_gcm_decrypt(uchar *ciphertext, uint ciphertext_len, uchar* aad, uint aad_len, uchar *key, uchar* tag,
+int auth_enc_decrypt(uchar *ciphertext, uint ciphertext_len, uchar* aad, uint aad_len, uchar *key, uchar* tag,
                     uchar *iv,  uchar **plaintext){
     const EVP_CIPHER *cypher=AUTH_ENCRYPT_DEFAULT;
     int block_len = EVP_CIPHER_block_size(cypher);
@@ -313,7 +336,15 @@ int aes_gcm_decrypt(uchar *ciphertext, uint ciphertext_len, uchar* aad, uint aad
     return plaintext_len;    
 }
 
-
+/**
+ * @brief digest computation
+ * 
+ * @param cypher input
+ * @param plaintext input
+ * @param plaintext_len input
+ * @param ciphertext output
+ * @return digest length, 0 on error
+ */
 uint digest(const EVP_MD* cypher, uchar* plaintext, uint plaintext_len, uchar** ciphertext){
 
     if(plaintext_len>BUFFER_MAX){
@@ -365,6 +396,10 @@ uint digest_compare(const uchar* digest1, const uchar* digest2, const uint len){
 // sha 256 wrapper
 uint sha_256_digest(uchar* plaintext, uint plaintext_len, uchar** chipertext){
     return digest(EVP_sha256(), plaintext, plaintext_len, chipertext);
+}
+
+uint default_digest(uchar* plaintext, uint plaintext_len, uchar** chipertext){
+    return digest(DIEGST_DEFAULT, plaintext, plaintext_len, chipertext);
 }
 
 int serialize_certificate(FILE* cert_file, uchar** certificate){
@@ -653,6 +688,15 @@ uint derive_secret(void* privkey, uchar* peer_key, uint peer_key_len , uchar** s
     return skeylen;
 }
 
+int random_generate(const uint lenght, uchar* nuance){
+    
+    if(!RAND_poll()){return 0;}
+    if(1 != RAND_bytes(nuance, lenght)) { 
+        perror("Error: RAND_bytes failed\n");
+        return 0;
+    }
+    return 1;
+}
 /*
 int main(int argc, char* argv[]){
     uchar* skey_A;
