@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <vector>
 #include <limits.h>
 #include <sys/mman.h>
 #include <semaphore.h>
@@ -15,6 +16,8 @@
 #include <openssl/pem.h>
 #include <openssl/rand.h>
 #include <openssl/x509_vfy.h>
+#include <sys/msg.h>
+#include <sys/ipc.h>
 #include <fcntl.h>
 #include "constant.h"
 #include "util.h"
@@ -27,11 +30,16 @@ using uchar=unsigned char;
 */
 struct user_info {
     string username;
-    int socket_id; 
+    int socket_id;
+    string msg_queue_key;
+    int to_relay_user_id;  // -1 in case of nothing or user_id of the peer who set the request to chat
 };
 
 
-
+struct msg_to_relay{
+    long type;
+    char buffer[1000];
+};
 
 //Parameters of connection
 const char *srv_ipv4 = "127.0.0.1";
@@ -96,15 +104,33 @@ int set_user_socket(string username, int socket){
 }
 
 
-void print_user_data_store(){
+/**
+ * @brief obtain key of the message queue of user_id
+ * @return key of user_id or empty string in case of error 
+ */
+string get_key_message_queue(size_t user_id){
+    if(user_id >= REGISTERED_USERS){
+        return "";
+    }
+
     sem_t* sem_id= sem_open(sem_user_store_name, O_CREAT, 0600, 1);
     sem_enter(sem_id);
 
+    user_info* user_status = (user_info*)shmem;
+    string msg_key = user_status[user_id].msg_queue_key;
+
+    sem_exit(sem_id);
+    return msg_key;
+}
+
+void print_user_data_store(){
+    sem_t* sem_id= sem_open(sem_user_store_name, O_CREAT, 0600, 1);
+    sem_enter(sem_id);
     
     user_info* user_status = (user_info*)shmem;
     cout << "****** USER STATUS *******" << endl;
     for(int i=0; i<REGISTERED_USERS; i++){
-        cout << i << ") " << user_status[i].username << " | " << user_status[i].socket_id << " | " << ((user_status[i].socket_id==-1)?"offline":"online") << endl;
+        cout << "[" << i << "] " << user_status[i].username << " | " << user_status[i].socket_id << " | " << user_status[i].to_relay_user_id << " | " <<  user_status[i].msg_queue_key << " | "  << ((user_status[i].socket_id==-1)?"offline":"online") << endl;
     }
 
     sem_exit(sem_id);
@@ -127,19 +153,112 @@ user_info* get_user_datastore_copy(){
     return user_status;
 }
 
+
+/**
+ *  @brief checks if entry toRelay of username is set or not 
+ *  @return: userId of the other peer if set, -1 if not set, -2 in case of missing username
+ */ 
+int is_user_to_relay(string username){
+    int ret = -2;
+    sem_t* sem_id= sem_open(sem_user_store_name, O_CREAT, 0600, 1);
+    sem_enter(sem_id);
+
+    user_info* user_status = (user_info*)shmem;
+    for(int i=0; i<REGISTERED_USERS; i++){
+        if(user_status[i].username.compare(username) == 0){
+            ret = user_status[i].to_relay_user_id;
+            break;
+        }
+    }
+
+    sem_exit(sem_id);
+    return ret;
+}
+
+/**
+ *  @brief set entry toRelay of user user_id with the value of to_relay_user_id 
+ *  @return: 1 in case of success otherwise -1 in case of generic error, -2 in case in case the value is already set
+ */ 
+int set_user_to_relay(size_t user_id, size_t to_relay_user_id){
+    if(user_id >= REGISTERED_USERS || to_relay_user_id >= REGISTERED_USERS)
+        return -1;
+
+    sem_t* sem_id= sem_open(sem_user_store_name, O_CREAT, 0600, 1);
+    sem_enter(sem_id);
+    
+    user_info* user_status = (user_info*)shmem;
+    if(user_status[user_id].to_relay_user_id != -1)
+        return -2;
+    user_status[user_id].to_relay_user_id = to_relay_user_id;
+    string tmp = "Set to_relay_user_id of user " + user_status[user_id].username + "(" + to_string(user_id) + ") to " + to_string(to_relay_user_id);
+    log(tmp);
+
+
+    sem_exit(sem_id);
+    return 1;
+}
+
 //Hardcoded content due to the fact that users are already registered
 void initialize_user_info(user_info* user_status){
-    user_status[0].username = "alice";
-    user_status[0].socket_id = -1;
-    user_status[1].username = "bob";
-    user_status[1].socket_id = -1;
-    user_status[2].username = "charlie";
-    user_status[2].socket_id = -1;
-    user_status[3].username = "dave";
-    user_status[3].socket_id = -1;
-    user_status[4].username = "ethan";
-    user_status[4].socket_id = -1;
+    vector<string> usernames {"alice", "bob", "charlie", "dave", "ethan"};
+
+    for(int i=0; i < REGISTERED_USERS; i++){
+        user_status[i].username = usernames[i];
+        user_status[i].msg_queue_key = usernames[i] + "_queue";
+        user_status[i].socket_id = -1;
+        user_status[i].to_relay_user_id = -1;
+    }
 }
+
+// ---------------------------------------------------------------------
+// FUNCTIONS of INTER-PROCESS COMMUNICATION
+// ---------------------------------------------------------------------
+
+
+
+/** 
+ *  Send message to message queue of to_user_id
+ *  @return 0 in case of success, -1 in case of error
+ */
+int relay_write(int to_user_id){
+    //Obtain the key of the message queue
+    string key_string = get_key_message_queue(to_user_id);
+    msg_to_relay msg;
+    msg.type = 1;
+    strcpy("hello", msg.buffer);
+    msg.buffer[5] = '\0';
+
+    if(key_string == "")
+        errorHandler(GEN_ERR);
+
+    //Write to the message queue
+    key_t key = ftok(key_string.c_str(), 65); //TODO: control meaning
+    int msgid = msgget(key, 0666 | IPC_CREAT);
+    msgsnd(msgid, &msg, sizeof(msg), 0);
+    cout << "Sent to relay " << msg.buffer << endl;
+    return 0;
+}
+
+/**
+ * @brief read from message queue of user_id
+ **/
+int relay_read(int user_id){
+    //Obtain the key of the message queue
+    string key_string = get_key_message_queue(user_id);
+    msg_to_relay msg;
+
+    if(key_string == "")
+        errorHandler(GEN_ERR);
+
+    //Read from the message queue
+    key_t key = ftok(key_string.c_str(), 65); //TODO: control meaning
+    int msgid = msgget(key, 0666 | IPC_CREAT);
+    msgrcv(msgid, &msg, sizeof(msg), 1, 0);
+    cout << "Received from relay " << msg.buffer << endl;
+    
+    return 0;
+}
+
 
 // ---------------------------------------------------------------------
 // FUNCTIONS of HANDLING REPLIES FOR CLIENTS
@@ -147,24 +266,33 @@ void initialize_user_info(user_info* user_status){
 
 
 /**
- *  Handle the response to the client for the !chat command
+ *  @brief Handle the response to the client for the !chat command
  *  @return 0 in case of success, -1 in case of error
  */
-int handle_chat_request(int comm_socket_id){
+int handle_chat_request(int comm_socket_id, int client_user_id){
     log("CHAT opcode arrived");
     // Consuming the receiving buffer
-    int user_id;
-    int ret = recv(comm_socket_id, (void *)&user_id, sizeof(int), 0);
+    int peer_user_id;
+    int ret = recv(comm_socket_id, (void *)&peer_user_id, sizeof(int), 0);
 
     if (ret < 0)
         errorHandler(REC_ERR);
     if (ret == 0)
         vlog("No message from the server");
     
-    cout << "Request for chatting with user id " << user_id << " arrived " << endl;
-    /*
-    *    Work in progress
-    */
+    cout << "Request for chatting with user id " << peer_user_id << " arrived " << endl;
+    
+    //Set up user datastore to notify the other process
+    set_user_to_relay(peer_user_id,client_user_id);
+    print_user_data_store();
+
+    
+    //If no other request of notification send the message to the other process through his message queue
+    relay_write(peer_user_id);
+
+    //Wait for response to the own named pipe
+    relay_read(client_user_id);
+
     return 0;    
 }
 
@@ -239,18 +367,29 @@ int handle_get_online_users(int comm_socket_id){
 }
 
 
+/**
+ *  @brief Removes traces of other execution due to the utilization of "named" data structures (semaphores and pipes) that can survive
+ */
+void prior_cleanup(){
+    sem_unlink(sem_user_store_name); //Remove traces of usage for older execution  
+}
+
 
 int main()
 {
     //Create shared memory for mantaining info about users
-    sem_unlink(sem_user_store_name); //Remove traces of usage for older execution 
+    prior_cleanup();
+   
+    
     if(shmem == MAP_FAILED)
         errorHandler(GEN_ERR);
     user_info user_status[REGISTERED_USERS];
     initialize_user_info(user_status);
     memcpy(shmem, user_status, sizeof(user_info)*REGISTERED_USERS);
     set_user_socket("alice", 100); //to test the client
-
+    set_user_socket("bob", 100); //to test the client
+    set_user_socket("dave", 100); //to test the client
+    
     int ret;
     int listen_socket_id, comm_socket_id;   //socket indexes
     struct sockaddr_in srv_addr, cl_addr;   //address informations
@@ -296,12 +435,22 @@ int main()
             /*
             * HANDLE AUTH and UPDATE USER DATA STORE
             */
+            string client_username = "alice";
+            int client_user_id = 0;
 
             //Child process
             while (true)
             {
                 uchar msgOpcode;
                 
+                /*
+                * Control if there is a need to relay by checking if our entry is okay
+                */
+                if(is_user_to_relay(client_username) >= 0){
+                    cout << "Found request to relay" << endl;
+                    relay_read(client_user_id);
+                }
+
                 //Get Opcode from the client
                 ret = recv(comm_socket_id, (void *)&msgOpcode, sizeof(char), 0);
 
@@ -315,7 +464,7 @@ int main()
                 //Demultiplexing of opcode
                 switch (msgOpcode){
                     case CHAT_CMD:
-                        ret = handle_chat_request(comm_socket_id);
+                        ret = handle_chat_request(comm_socket_id, client_user_id);
                         if(ret<0)
                             errorHandler(GEN_ERR);
                         break;
