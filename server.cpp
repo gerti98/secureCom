@@ -221,21 +221,37 @@ void initialize_user_info(user_info* user_status){
  *  @return 0 in case of success, -1 in case of error
  */
 int relay_write(int to_user_id){
-    //Obtain the key of the message queue
-    string key_string = get_key_message_queue(to_user_id);
-    msg_to_relay msg;
-    msg.type = 1;
-    strcpy("hello", msg.buffer);
-    msg.buffer[5] = '\0';
+    log("Entering relay_write for " + to_string(to_user_id));
 
+    //Obtain the key of the message queue
+    string key_string = get_key_message_queue(to_user_id);    
     if(key_string == "")
         errorHandler(GEN_ERR);
 
+    log("Onbtained message queue key " + key_string);
+
+    msg_to_relay msg;
+    msg.type = 1;
+
+    //TODO: remove
+    msg.buffer[0] = 'H';
+    msg.buffer[1] = 'i';
+    msg.buffer[2] = '\0';
+    
+     
     //Write to the message queue
+
     key_t key = ftok(key_string.c_str(), 65); //TODO: control meaning
+    log("Key of ftok returned is " + to_string(key));
+
     int msgid = msgget(key, 0666 | IPC_CREAT);
+    log("msgid is " + to_string(key));
+
     msgsnd(msgid, &msg, sizeof(msg), 0);
-    cout << "Sent to relay " << msg.buffer << endl;
+
+    string tmp(msg.buffer);
+    log("Sent to relay " + tmp);
+
     return 0;
 }
 
@@ -243,6 +259,8 @@ int relay_write(int to_user_id){
  * @brief read from message queue of user_id
  **/
 int relay_read(int user_id){
+    log("Entering relay_read of " + to_string(user_id));
+    
     //Obtain the key of the message queue
     string key_string = get_key_message_queue(user_id);
     msg_to_relay msg;
@@ -254,7 +272,7 @@ int relay_read(int user_id){
     key_t key = ftok(key_string.c_str(), 65); //TODO: control meaning
     int msgid = msgget(key, 0666 | IPC_CREAT);
     msgrcv(msgid, &msg, sizeof(msg), 1, 0);
-    cout << "Received from relay " << msg.buffer << endl;
+    log("Received from relay " + std::string(msg.buffer));
     
     return 0;
 }
@@ -283,12 +301,12 @@ int handle_chat_request(int comm_socket_id, int client_user_id){
     cout << "Request for chatting with user id " << peer_user_id << " arrived " << endl;
     
     //Set up user datastore to notify the other process
-    set_user_to_relay(peer_user_id,client_user_id);
+    set_user_to_relay(client_user_id,client_user_id);
     print_user_data_store();
 
     
     //If no other request of notification send the message to the other process through his message queue
-    relay_write(peer_user_id);
+    relay_write(client_user_id);
 
     //Wait for response to the own named pipe
     relay_read(client_user_id);
