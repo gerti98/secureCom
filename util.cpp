@@ -76,5 +76,5 @@ void errorHandler(uint16_t errorId = GEN_ERR)
             break;
     }
 
-    exit(-1);
+   // exit(-1);
 }

@@ -19,6 +19,8 @@ using namespace std;
  * another client, to false otherwise*/
 bool isChatting = false;
 
+/* This global variable is setted to true when an error occurs*/
+bool error = false;
 
 struct commandMSG
 {
@@ -37,6 +39,7 @@ struct user
 {
     int userId;
     unsigned char* username;
+    size_t usernameSize;
     user* next;
 };
 
@@ -112,12 +115,16 @@ int chat(struct commandMSG* toSend)
  */
 void free_list_users(struct user* userlist)
 {
+    if(userlist==NULL)
+        return;
+
     struct user* toDelete = userlist;
     struct user* nextDeletion = NULL;
 
     while(toDelete!=NULL)
     {
         nextDeletion = toDelete->next;
+        free(toDelete->username);
         free(toDelete);
         toDelete = nextDeletion;
     }
@@ -132,6 +139,9 @@ void free_list_users(struct user* userlist)
  */
 int retrieveOnlineUsers(int sock_id, user*& user_list)
 {
+    if(user_list!=NULL)
+        free_list_users(user_list);
+
     unsigned int howMany;
     int ret = recv(sock_id, (void*)&howMany, sizeof(int), 0);  
     howMany = ntohl(howMany);
@@ -163,6 +173,7 @@ int retrieveOnlineUsers(int sock_id, user*& user_list)
         tmp->username = NULL;
         tmp->userId = -1;
         tmp->next = NULL;
+        tmp->usernameSize = 0;
 
         ret = recv(sock_id, (void*)&(tmp->userId), sizeof(int), 0);  
         tmp->userId = ntohl(tmp->userId);
@@ -175,14 +186,15 @@ int retrieveOnlineUsers(int sock_id, user*& user_list)
         }
 
         ret = recv(sock_id, (void*)&username_size, sizeof(int), 0);  
-        username_size = ntohl(username_size);
-        cout << " DBG - Username size: " << username_size << endl;
         if(ret <= 0)
         {
             free(tmp);
             free_list_users(user_list);
             return -1;
         }
+        username_size = ntohl(username_size);
+        cout << " DBG - Username size: " << username_size << endl;
+        tmp->usernameSize = username_size;
 
         if(username_size>MAX_USERNAME_SIZE)
         {
@@ -195,6 +207,7 @@ int retrieveOnlineUsers(int sock_id, user*& user_list)
         ret = recv(sock_id, (void*)(tmp->username), username_size, 0);  
         if(ret <= 0)
         {   
+            free(tmp->username);
             free(tmp);
             free_list_users(user_list);
             return -1;
@@ -243,6 +256,35 @@ int print_list_users(user* userlist)
     return 0;
 }
 
+/**
+ * @brief Get the Username From the user id
+ * 
+ * @param userId 
+ * @param userlist 
+ * @return string that is the username, NULL if error
+ */
+string getUsernameFromID(int userId, user* userlist)
+{ 
+    if(userlist==NULL)
+    {
+        cout << " Warning: userlist is null " << endl;
+        return NULL;
+    }
+
+    struct user* tmp = userlist;
+    while(tmp!=NULL)
+    {
+        if(tmp->userId==userId)
+        {
+            //strncpy((char*)username, (char*)tmp->username, tmp->usernameSize);  
+            string username ((char*)(tmp->username)); 
+            return username;
+        }
+        tmp = tmp->next;
+    }
+    return NULL;
+}
+
 
 /**
  * @brief It is in charge of handlig the sending of a command to the server
@@ -287,6 +329,8 @@ int send_message(int sock_id, genericMSG* msgToSend)
     if(ret < 0 || ret!=msgToSend->length)
         return -1;
 
+    free(msgToSend->payload);
+
     return 0;
 }
 
@@ -315,36 +359,70 @@ int receive_message(int sock_id, string msg)
 
 int main(int argc, char* argv[])
 {
+    cout << " inizio " << endl;
+    
+        
     int sock_id;                // socket id
     int len;                    // size message
     int size;                   // server response size
     int ret;                    // var to store function return value
     uint16_t sizeMsgServer;     // size msg server on the net
 
+    uint8_t commandCode = NOT_VALID_CMD;
+
+    // Data structure which represents a generic message
+    struct genericMSG msgGenToSend;
+    msgGenToSend.opcode = MSG;
+    msgGenToSend.payload = NULL;
+    msgGenToSend.length = 0;
+
+    // Data structure which represents a command message
+    struct commandMSG cmdToSend;
+    cmdToSend.opcode = NOT_VALID_CMD;
+    cmdToSend.userId = -1;
+
+    // pointer to the list of online users
+    user* user_list = NULL;
+
+    // username of the user involved in chat with me
+    string counterpart;
+
     struct sockaddr_in srv_addr;
     char* risp;
     
     const char* srv_ip = "127.0.0.1";
     const int srv_port = 4242;
-
+   
     // Socket creation
     sock_id = socket(AF_INET, SOCK_STREAM, 0);
-    if(sock_id<0)
+    if(sock_id<0){
+        error = true;
         errorHandler(CONN_ERR);
+        goto close_all;
+    }
     
     // Initialization for server address
-    if(!memset(&srv_addr, 0, sizeof(srv_addr)))
+    if(!memset(&srv_addr, 0, sizeof(srv_addr))){
+        error = true;
         errorHandler(GEN_ERR); 
+        goto close_all;
+    }
+
     srv_addr.sin_family = AF_INET;
     srv_addr.sin_port = htons(srv_port);
     ret = inet_pton(AF_INET, srv_ip, &srv_addr.sin_addr);
-    if(ret<=0)
+    if(ret<=0){
+        error = true;
         errorHandler(CONN_ERR);
-    
+        goto close_all;
+    }
     // Socket connection
     ret = connect(sock_id, (struct sockaddr*)&srv_addr, sizeof(srv_addr));
-    if(ret < 0)
+    if(ret < 0){
+        error = true;
         errorHandler(CONN_ERR);
+        goto close_all;
+    }
     
     welcome();
 
@@ -357,26 +435,22 @@ int main(int argc, char* argv[])
         cin >> userInput;
         cout << endl;
 
-        uint8_t commandCode = NOT_VALID_CMD;
-        struct genericMSG msgGenToSend;
-        msgGenToSend.opcode = MSG;
-        msgGenToSend.payload = NULL;
-        msgGenToSend.length = 0;
-
-        struct commandMSG cmdToSend;
-        cmdToSend.opcode = NOT_VALID_CMD;
-        cmdToSend.userId = -1;
-
         if(!isChatting || (isChatting==true && userInput.compare("!stop_chat")))
         {
+            /* ****************************************
+             *          COMMAND SECTION
+             * *****************************************/
             commandCode = commandStringHandler(userInput);
 
             switch (commandCode)
             {
                 case CHAT_CMD:
                     ret = chat(&cmdToSend);
-                    if(ret<0)
+                    if(ret<0){
+                        error = true;
                         errorHandler(GEN_ERR);
+                        goto close_all;
+                    }
                 break;
 
                 case ONLINE_CMD:
@@ -407,12 +481,18 @@ int main(int argc, char* argv[])
         }
         else
         {
+             /* ****************************************
+             *          CHAT SECTION
+             * *****************************************/
             commandCode = MSG;
             msgGenToSend.opcode = MSG;
             msgGenToSend.length = userInput.size();
             msgGenToSend.payload = (unsigned char*)malloc(msgGenToSend.length);
-            if(!msgGenToSend.payload)
+            if(!msgGenToSend.payload){
+                error = true;
                 errorHandler(MALLOC_ERR);
+                goto close_all;
+            }
 
             strncpy((char*)msgGenToSend.payload, userInput.c_str(), userInput.size());  
 
@@ -421,11 +501,17 @@ int main(int argc, char* argv[])
 
         if(commandCode!=HELP_CMD) // I have to send nothing to the server if the command is help
         {
+             /* ****************************************
+             *          SEND TO THE SERVER SECTION
+             * *****************************************/
             if(isChatting && cmdToSend.opcode!=STOP_CHAT)
             {
                 ret = send_message(sock_id, &msgGenToSend);
-                if(ret!=0)
+                if(ret!=0){
+                    error = true;
                     errorHandler(SEND_ERR);
+                    goto close_all;
+                }
                 cout << " Message sent " << endl;
             }
             else
@@ -433,51 +519,80 @@ int main(int argc, char* argv[])
                 // Send the command message to the server
                 cout << " DBG - I have to sent a command message to the server ... " << endl;
                 ret = send_command_to_server(sock_id, &cmdToSend);
-                if(ret!=0)
+                if(ret!=0){
+                    error = true;
                     errorHandler(SEND_ERR);
+                    goto close_all;
+                }
                 cout << " DBG - Command to server sent" << endl;
             }
+            
 
+            /* ****************************************
+             *      RECEIVE FROM THE SERVER SECTION
+             * *****************************************/
             cout << " DBG - wait for server response" << endl;
 
             // I read the first byte to understand which type of message the server is sending to me
             uint8_t op;
             ret = recv(sock_id, (void*)&op, sizeof(uint8_t), 0);  
-            if(ret < 0)
+            if(ret < 0){
+                error = true;
                 errorHandler(REC_ERR);
+                goto close_all;
+            }
             if(ret == 0)
                 vlog("No message from the server");
 
-
+            /* ****************************************************************
+             * Action to perform considering the things sent from the server
+             * ****************************************************************/
             switch (op)
             {
                 case ONLINE_CMD:
                 {
                     cout << " DBG - Online users command handling" << endl;
-
-                    user* user_list = NULL;
                     ret = retrieveOnlineUsers(sock_id, user_list);
-                    if(ret == 0)
+                    if(ret == 0){
                         cout << " ** No users are online ** " << endl;
-                    else if (ret==-1)
+                    }
+                    else if (ret==-1){
+                        error = true;
                         errorHandler(GEN_ERR);
-                    else // correct output
-                        if(print_list_users(user_list)!=0)
+                        goto close_all;
+                    }
+                    else{ // correct output
+                        if(print_list_users(user_list)!=0){
+                            error = true;
                             errorHandler(GEN_ERR);
-                    // clean        
-                    free_list_users(user_list);
+                            goto close_all;
+                        }
+                    }
+                    // free before the termination of the program or before a new retrieveOnlineUsers        
+                    // free_list_users(user_list);
                 }
                 break;
 
                 case CHAT_POS:
                 {
                     // The server says that the client that I want to contact is available
-                    int peer_id;
-                    ret = recv(sock_id, (void*)&peer_id, sizeof(int), 0);  
-                    if(ret < 0)
+                    int counterpart_id;
+                   
+                    ret = recv(sock_id, (void*)&counterpart_id, sizeof(int), 0);  
+                    if(ret < 0) {
+                        error = true;
                         errorHandler(REC_ERR);
+                        goto close_all;
+                    }
+
+                    counterpart = getUsernameFromID(counterpart_id, user_list);
+                    if(counterpart.empty()){
+                        error = true;
+                        errorHandler(GEN_ERR);
+                        goto close_all;
+                    }
                     
-                    if(cmdToSend.userId!=peer_id)
+                    if(cmdToSend.userId!=counterpart_id)
                     {
                         cout << " Server internal error: the user id requested and the one available does not match" << endl;
                         break;
@@ -487,7 +602,7 @@ int main(int argc, char* argv[])
 
                     cout << " ******************************** " << endl;
                     cout << "               CHAT               " << endl;
-                    cout << " Send a message!" << endl;
+                    cout << " Send a message to " <<  counterpart << endl;
                 }  
                 break;
 
@@ -495,14 +610,27 @@ int main(int argc, char* argv[])
                 {
                     string message;
                     ret = receive_message(sock_id, message);
-                    if(ret!=0)
+                    if(ret!=0) {
+                        error = true;
                         errorHandler(REC_ERR);
-                    cout << " CHAT -> " << message << endl;
+                        goto close_all;
+                    }
+
+                    if(counterpart.empty()){
+                        error = true;
+                        errorHandler(GEN_ERR);
+                        goto close_all;
+                    }
+                    cout << " " << counterpart << " -> " << message << endl;
                 }
                 break;
 
                 default:
+                {
+                    error = true;
                     errorHandler(SRV_INTERNAL_ERR);
+                    goto close_all;
+                }
                 break;
             }
         }
@@ -511,8 +639,20 @@ int main(int argc, char* argv[])
             break;
         
     }
-    
+
+close_all:
+    if(msgGenToSend.payload)
+        free(msgGenToSend.payload);
+
+    free_list_users(user_list);
     close(sock_id);
-    cout << "\n Bye Bye" << endl;
-    return 0;
+    
+    if(error) {
+        cout << " Forced secure termination " << endl;
+        exit(-1);
+    }
+    else {
+        cout << "\n Bye Bye" << endl;
+        return 0;
+    }  
 }
