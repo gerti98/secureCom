@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <iostream>
+#include <vector>
 #include <climits>
 #include "constant.h"
 #include "util.h"
@@ -83,6 +84,8 @@ uint8_t commandStringHandler(string cmd)
         return CHAT_CMD;
     else if(cmd.compare("!help")==0)
         return HELP_CMD;
+    else if(cmd.compare("!stop_chat"))
+        return STOP_CHAT;
     else
         return NOT_VALID_CMD;
 }
@@ -198,6 +201,7 @@ int retrieveOnlineUsers(int sock_id, user*& user_list)
         }
         
         tmp->username[username_size] = '\0';
+
         cout << " DBG - Username: " << tmp->username << endl;
         if(i==0)
             user_list = tmp;
@@ -261,6 +265,53 @@ int send_command_to_server(int sock_id, commandMSG* cmdToSend)
     return 0;
 }
 
+/**
+ * @brief It send the message to the server
+ * 
+ * @param sock_id socket id
+ * @param msgToSend data structure that contains the info for the message
+ * @return int 
+ */
+int send_message(int sock_id, genericMSG* msgToSend)
+{
+    int ret = send(sock_id,(void*)&msgToSend->opcode, sizeof(uint8_t), 0);
+    if(ret < 0 || ret!=sizeof(uint8_t))
+        return -1;
+                
+    uint16_t size = htons(msgToSend->length);
+    ret = send(sock_id,(void*)&size, sizeof(uint16_t), 0);
+    if(ret < 0 || ret!=sizeof(uint16_t))
+        return -1;
+
+    ret = send(sock_id,(void*)&msgToSend->payload, msgToSend->length, 0);
+    if(ret < 0 || ret!=msgToSend->length)
+        return -1;
+
+    return 0;
+}
+
+/**
+ * @brief Receive a message sent by the other communication party and forwarded by the server
+ * 
+ * @param sock_id socket id
+ * @param msg string where the received message is inserted
+ * @return int -1 id error, 0 otherwise
+ */
+int receive_message(int sock_id, string msg)
+{
+    uint16_t msg_size;
+    int ret = recv(sock_id, (void*)&msg_size, sizeof(uint16_t), 0); 
+    if(ret <= 0)
+        return -1;
+
+    uint16_t real_size = ntohs(msg_size);
+    ret = recv(sock_id, (void*)&msg, msg_size, 0); 
+    if(ret <= 0)
+        return -1;
+
+    return 0;
+}
+
 
 int main(int argc, char* argv[])
 {
@@ -316,57 +367,66 @@ int main(int argc, char* argv[])
         cmdToSend.opcode = NOT_VALID_CMD;
         cmdToSend.userId = -1;
 
-        if(!isChatting)
+        if(!isChatting || (isChatting==true && userInput.compare("!stop_chat")))
         {
             commandCode = commandStringHandler(userInput);
 
             switch (commandCode)
             {
-            case CHAT_CMD:
-                ret = chat(&cmdToSend);
-                if(ret<0)
-                    errorHandler(GEN_ERR);
+                case CHAT_CMD:
+                    ret = chat(&cmdToSend);
+                    if(ret<0)
+                        errorHandler(GEN_ERR);
                 break;
 
-            case ONLINE_CMD:
-                cmdToSend.opcode = ONLINE_CMD;
+                case ONLINE_CMD:
+                    cmdToSend.opcode = ONLINE_CMD;
                 break;
             
-            case HELP_CMD:
-                help();
+                case HELP_CMD:
+                    help();
                 break;
 
-            case EXIT_CMD:
-                // The command is handled at the end of the while body
-                cmdToSend.opcode = EXIT_CMD;
+                case EXIT_CMD:
+                    // The command is handled at the end of the while body
+                    cmdToSend.opcode = EXIT_CMD;
                 break;
             
-            case NOT_VALID_CMD:
-                cout << "Command Not Valid" << endl;
+                case STOP_CHAT:
+                    cmdToSend.opcode = STOP_CHAT;
                 break;
             
-            default:
-                cout << "Command Not Valid" << endl;
+                case NOT_VALID_CMD:
+                    cout << "Command Not Valid" << endl;
+                break;
+            
+                default:
+                    cout << "Command Not Valid" << endl;
                 break;
             }
         }
         else
         {
             commandCode = MSG;
-            // Management of the message chat
-            /*
-             *  WORK IN PROGRESS
-             */
+            msgGenToSend.opcode = MSG;
+            msgGenToSend.length = userInput.size();
+            msgGenToSend.payload = (unsigned char*)malloc(msgGenToSend.length);
+            if(!msgGenToSend.payload)
+                errorHandler(MALLOC_ERR);
+
+            strncpy((char*)msgGenToSend.payload, userInput.c_str(), userInput.size());  
+
+            cout << "DBG - Invio il messaggio <" << msgGenToSend.payload << "> of length <" << msgGenToSend.length << endl;
         }
 
         if(commandCode!=HELP_CMD) // I have to send nothing to the server if the command is help
         {
-            if(isChatting)
+            if(isChatting && cmdToSend.opcode!=STOP_CHAT)
             {
-                cout << " Work in progress - Management of chat " << endl;
-                /*
-                 *  WORKING IN PROGRESS
-                 */
+                ret = send_message(sock_id, &msgGenToSend);
+                if(ret!=0)
+                    errorHandler(SEND_ERR);
+                cout << " Message sent " << endl;
             }
             else
             {
@@ -388,30 +448,68 @@ int main(int argc, char* argv[])
             if(ret == 0)
                 vlog("No message from the server");
 
-            if(op==ONLINE_CMD)
+
+            switch (op)
             {
-                cout << " DBG - Online users command handling" << endl;
-                user* user_list = NULL;
-            
-                ret = retrieveOnlineUsers(sock_id, user_list);
-                if(ret == 0)
-                    cout << " ** No users are online ** " << endl;
-                else if (ret==-1)
-                    errorHandler(GEN_ERR);
-                else // correct output
-                    if(print_list_users(user_list)!=0)
+                case ONLINE_CMD:
+                {
+                    cout << " DBG - Online users command handling" << endl;
+
+                    user* user_list = NULL;
+                    ret = retrieveOnlineUsers(sock_id, user_list);
+                    if(ret == 0)
+                        cout << " ** No users are online ** " << endl;
+                    else if (ret==-1)
                         errorHandler(GEN_ERR);
-                // clean        
-                free_list_users(user_list);
-            }
-            else
-            {
-                cout << " DBG - Work in progress " << endl;
-            }
-    
-            if(commandCode==EXIT_CMD)
+                    else // correct output
+                        if(print_list_users(user_list)!=0)
+                            errorHandler(GEN_ERR);
+                    // clean        
+                    free_list_users(user_list);
+                }
                 break;
+
+                case CHAT_POS:
+                {
+                    // The server says that the client that I want to contact is available
+                    int peer_id;
+                    ret = recv(sock_id, (void*)&peer_id, sizeof(int), 0);  
+                    if(ret < 0)
+                        errorHandler(REC_ERR);
+                    
+                    if(cmdToSend.userId!=peer_id)
+                    {
+                        cout << " Server internal error: the user id requested and the one available does not match" << endl;
+                        break;
+                    }
+
+                    isChatting = true;
+
+                    cout << " ******************************** " << endl;
+                    cout << "               CHAT               " << endl;
+                    cout << " Send a message!" << endl;
+                }  
+                break;
+
+                case CHAT_RESPONSE:
+                {
+                    string message;
+                    ret = receive_message(sock_id, message);
+                    if(ret!=0)
+                        errorHandler(REC_ERR);
+                    cout << " CHAT -> " << message << endl;
+                }
+                break;
+
+                default:
+                    errorHandler(SRV_INTERNAL_ERR);
+                break;
+            }
         }
+    
+        if(commandCode==EXIT_CMD)
+            break;
+        
     }
     
     close(sock_id);

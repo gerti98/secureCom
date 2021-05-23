@@ -67,6 +67,9 @@ void errorHandler(uint16_t errorId = GEN_ERR)
         case SEM_CLOSE_ERR:
             printf("Error on sem_close");
             break;
+        
+        case SRV_INTERNAL_ERR:
+            printf("Server internal error");
             
         default:
             printf("Generic Error\n");
