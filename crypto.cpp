@@ -192,7 +192,8 @@ int auth_enc_encrypt( uchar *plaintext, int plaintext_len, uchar* aad, uint aad_
     }
     int block_len = EVP_CIPHER_block_size(cypher);
     int iv_len = EVP_CIPHER_iv_length(cypher);
-    int tag_len=16;
+    int tag_len=TAG_DEFAULT;
+
 
     if(plaintext_len > INT_MAX -block_len) { 
         perror("Error: integer overflow (meggase too big?)\n");
@@ -265,6 +266,7 @@ int auth_enc_encrypt( uchar *plaintext, int plaintext_len, uchar* aad, uint aad_
     // deallocate contxt
     EVP_CIPHER_CTX_free(ctx);
 
+    
     return ciphertext_len;
 }
 
@@ -273,6 +275,7 @@ int auth_enc_decrypt(uchar *ciphertext, uint ciphertext_len, uchar* aad, uint aa
                     uchar *iv,  uchar **plaintext){
     const EVP_CIPHER *cypher=AUTH_ENCRYPT_DEFAULT;
     int block_len = EVP_CIPHER_block_size(cypher);
+    
     int iv_len = EVP_CIPHER_iv_length(cypher);
     int tag_len=16;
 
@@ -765,37 +768,42 @@ int main(int argc, char* argv[]){
     return 0;
     
 }
-
+*/
 /*
 int main(){
 
     uchar key[] = "0123456789abcdeF";
     uchar plaintext[]="plaintext!=?PLAINTEXT1234";  
-
+    int plaintext_len=26;
     // those are going to be allocated by the crypto API
     uchar* plainres;
     uchar* iv;
     uchar* ciphertext;
 
-    int plain_len= aes_128_cbc_encrypt(plaintext, 26, key, &iv, &ciphertext);
-    aes_128_cbc_decrypt(&plainres, plain_len, key, iv, ciphertext);
-    cout <<plainres;
-    cout<<"\n";
+    // authenticated data to be sent in the clear
+    uchar auth_clear[]="abc";
+    int ac_len=4;
 
-    uchar aad[]="abc";
+    // compose aad with cyphertext lenght, (equal of plaintext lenght when using GCM)
+    uchar* aad=(uchar*)malloc(ac_len+sizeof(int));
+    memcpy(aad,auth_clear, ac_len );
+    memcpy(aad+ac_len, &plaintext_len, sizeof(int));
+    uint aad_len=ac_len+sizeof(int);
+;
     uchar* tag;
-    cipher_len= aes_gcm_encrypt(plaintext, 26, aad, 4, key, &tag,&iv, &ciphertext);
+    int cipher_len= auth_enc_encrypt(plaintext, plaintext_len, aad, aad_len, key, &tag,&iv, &ciphertext);
     cout<<"CT:"<<endl;
 	BIO_dump_fp (stdout, (const char *)ciphertext, cipher_len);
 	cout<<"Tag:"<<endl;
 	BIO_dump_fp (stdout, (const char *)tag, 16);
-    aes_gcm_decrypt(ciphertext, cipher_len,aad, 4, key, tag, iv, &plainres);
+    auth_enc_decrypt(ciphertext, cipher_len,aad, aad_len, key, tag, iv, &plainres);
     cout<<"PT:"<<endl;
 	BIO_dump_fp (stdout, (const char *)plainres, 26);
     cout <<plainres;
     cout<<"\n";
 
     // free it's necessary after usage
+    free(aad);
     free(iv);
     free(ciphertext);
     free(plainres);
@@ -804,5 +812,5 @@ int main(){
 
 
 }
-*/
 
+*/

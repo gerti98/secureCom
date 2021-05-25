@@ -71,4 +71,6 @@
 #define SYMMETRIC_DEFAULT EVP_aes_256_cbc()
 #define AUTH_ENCRYPT_DEFAULT EVP_aes_256_gcm()
 #define NUANCE_DEFAULT 32
+#define TAG_DEFAULT 16
+#define IV_DEFAULT EVP_CIPHER_iv_length(AUTH_ENCRYPT_DEFAULT)
 #endif
