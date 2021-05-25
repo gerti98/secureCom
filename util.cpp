@@ -33,6 +33,14 @@ void errorHandler(uint16_t errorId = GEN_ERR)
             printf("Generic Error\n");
             break;
 
+        case BIND_ERR:
+            printf("Bind Error\n");
+            break;
+
+        case LISTEN_ERR:
+            printf("Listen Error\n");
+            break;
+            
         case CONN_ERR:
             perror("Connection Error\n");
             break;
