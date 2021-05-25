@@ -22,6 +22,9 @@ bool isChatting = false;
 /* This global variable is setted to true when an error occurs*/
 bool error = false;
 
+/* Username of the "logged" user*/
+string loggedUser;
+
 struct commandMSG
 {
     uint8_t opcode;
@@ -325,7 +328,7 @@ int send_message(int sock_id, genericMSG* msgToSend)
     if(ret < 0 || ret!=sizeof(uint16_t))
         return -1;
 
-    ret = send(sock_id,(void*)&msgToSend->payload, msgToSend->length, 0);
+    ret = send(sock_id,(void*)msgToSend->payload, msgToSend->length, 0);
     if(ret < 0 || ret!=msgToSend->length)
         return -1;
 
@@ -348,20 +351,55 @@ int receive_message(int sock_id, string msg)
     if(ret <= 0)
         return -1;
 
-    uint16_t real_size = ntohs(msg_size);
-    ret = recv(sock_id, (void*)&msg, msg_size, 0); 
+    uint16_t host_msg_size = ntohs(msg_size);
+
+    // CONTROLLA MSG SIZE PER OVERFLOW
+    char* msg_vector = (char*)malloc(host_msg_size);
+    if(!msg_vector)
+        return -1;
+
+    ret = recv(sock_id, (void*)msg_vector, host_msg_size, 0); 
     if(ret <= 0)
         return -1;
 
+    msg = (string)msg_vector;
     return 0;
 }
 
+int authentication(int sock_id)
+{
+    // This function will contain the authentication procedure
+    // performed between client and server. For now we have a simplified version
+    bool tooBig = false;
+    do{
+        if(tooBig)
+            cout << " The username inserted is too big! " << endl;
+        cout << " Who are you? " << endl;
+        cout << " > ";
+        cin >> loggedUser;
+        if(loggedUser.size()+1>MAX_USERNAME_SIZE)
+            tooBig = true;
+    }while(tooBig);
+
+    // For now the authentication phase consists in sending the username to the server
+    // first - send the size
+    uint16_t stringsize = loggedUser.size()+1;
+    uint16_t net_stringsize = htons(stringsize);
+    int ret = send(sock_id, (void*)&net_stringsize, sizeof(uint16_t), 0);
+    if(ret<=0 || ret != sizeof(uint16_t))
+        return -1;
+
+    // second - send the username
+    ret = send(sock_id, (void*)loggedUser.c_str(), stringsize, 0);
+    if(ret<=0 || ret != stringsize)
+        return -1;
+    
+    // For now let's assume that the authentication has been succesfully executed
+    return 0;
+}
 
 int main(int argc, char* argv[])
-{
-    cout << " inizio " << endl;
-    
-        
+{     
     int sock_id;                // socket id
     int len;                    // size message
     int size;                   // server response size
@@ -425,6 +463,17 @@ int main(int argc, char* argv[])
     }
     
     welcome();
+
+   
+    ret = authentication(sock_id);
+    if(ret<0)
+    {
+        error = true;
+        errorHandler(AUTHENTICATION_ERR);
+        goto close_all;
+    }
+
+    cout << " --- AUTHENTICATION DONE --- " << endl;
 
     while(true)
     {
@@ -495,10 +544,11 @@ int main(int argc, char* argv[])
             }
 
             strncpy((char*)msgGenToSend.payload, userInput.c_str(), userInput.size());  
-
-            cout << "DBG - Invio il messaggio <" << msgGenToSend.payload << "> of length <" << msgGenToSend.length << endl;
         }
 
+        /* ********************************
+         *  COMMUNICATIONS WITH SERVER 
+         * ********************************/
         if(commandCode!=HELP_CMD) // I have to send nothing to the server if the command is help
         {
              /* ****************************************
@@ -506,13 +556,14 @@ int main(int argc, char* argv[])
              * *****************************************/
             if(isChatting && cmdToSend.opcode!=STOP_CHAT)
             {
+                cout << " DBG - Sending message <" << msgGenToSend.payload << "> of length <" << msgGenToSend.length << endl;
                 ret = send_message(sock_id, &msgGenToSend);
                 if(ret!=0){
                     error = true;
                     errorHandler(SEND_ERR);
                     goto close_all;
                 }
-                cout << " Message sent " << endl;
+                cout << " DBG -  Message sent " << endl;
             }
             else
             {
@@ -536,13 +587,11 @@ int main(int argc, char* argv[])
             // I read the first byte to understand which type of message the server is sending to me
             uint8_t op;
             ret = recv(sock_id, (void*)&op, sizeof(uint8_t), 0);  
-            if(ret < 0){
+            if(ret <= 0){
                 error = true;
                 errorHandler(REC_ERR);
                 goto close_all;
             }
-            if(ret == 0)
-                vlog("No message from the server");
 
             /* ****************************************************************
              * Action to perform considering the things sent from the server

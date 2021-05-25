@@ -22,6 +22,7 @@
 #define SEM_CLOSE_ERR       0x0E
 #define MMAP_ERR            0x0F
 #define SRV_INTERNAL_ERR    0x10
+#define AUTHENTICATION_ERR  0x11
 
 /*
  *  COMMAND CODE
