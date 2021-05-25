@@ -18,6 +18,7 @@
 #include <openssl/x509_vfy.h>
 #include <sys/msg.h>
 #include <sys/ipc.h>
+#include <errno.h>
 #include <fcntl.h>
 #include "constant.h"
 #include "util.h"
@@ -105,26 +106,6 @@ int set_user_socket(string username, int socket){
     return found;
 }
 
-
-// /**
-//  * @brief obtain key of the message queue of user_id
-//  * @return key of user_id or empty string in case of error 
-//  */
-// string get_key_message_queue(size_t user_id){
-//     if(user_id >= REGISTERED_USERS){
-//         return "";
-//     }
-
-//     sem_t* sem_id= sem_open(sem_user_store_name, O_CREAT, 0600, 1);
-//     sem_enter(sem_id);
-
-//     user_info* user_status = (user_info*)shmem;
-//     string msg_key = user_status[user_id].msg_queue_key;
-
-//     sem_exit(sem_id);
-//     return msg_key;
-// }
-
 void print_user_data_store(){
     sem_t* sem_id= sem_open(sem_user_store_name, O_CREAT, 0600, 1);
     sem_enter(sem_id);
@@ -156,50 +137,6 @@ user_info* get_user_datastore_copy(){
 }
 
 
-// /**
-//  *  @brief checks if entry toRelay of username is set or not 
-//  *  @return: userId of the other peer if set, -1 if not set, -2 in case of missing username
-//  */ 
-// int is_user_to_relay(string username){
-//     int ret = -2;
-//     sem_t* sem_id= sem_open(sem_user_store_name, O_CREAT, 0600, 1);
-//     sem_enter(sem_id);
-
-//     user_info* user_status = (user_info*)shmem;
-//     for(int i=0; i<REGISTERED_USERS; i++){
-//         if(user_status[i].username.compare(username) == 0){
-//             ret = user_status[i].to_relay_user_id;
-//             break;
-//         }
-//     }
-
-//     sem_exit(sem_id);
-//     return ret;
-// }
-
-// /**
-//  *  @brief set entry toRelay of user user_id with the value of to_relay_user_id 
-//  *  @return: 1 in case of success otherwise -1 in case of generic error, -2 in case in case the value is already set
-//  */ 
-// int set_user_to_relay(size_t user_id, size_t to_relay_user_id){
-//     if(user_id >= REGISTERED_USERS || to_relay_user_id >= REGISTERED_USERS)
-//         return -1;
-
-//     sem_t* sem_id= sem_open(sem_user_store_name, O_CREAT, 0600, 1);
-//     sem_enter(sem_id);
-    
-//     user_info* user_status = (user_info*)shmem;
-//     if(user_status[user_id].to_relay_user_id != -1)
-//         return -2;
-//     user_status[user_id].to_relay_user_id = to_relay_user_id;
-//     string tmp = "Set to_relay_user_id of user " + user_status[user_id].username + "(" + to_string(user_id) + ") to " + to_string(to_relay_user_id);
-//     log(tmp);
-
-
-//     sem_exit(sem_id);
-//     return 1;
-// }
-
 //Hardcoded content due to the fact that users are already registered
 void initialize_user_info(user_info* user_status){
     vector<string> usernames {"alice", "bob", "charlie", "dave", "ethan"};
@@ -212,6 +149,24 @@ void initialize_user_info(user_info* user_status){
     }
 }
 
+
+int get_user_id_by_username(string username){
+    log("Entering get id by username");
+    sem_t* sem_id= sem_open(sem_user_store_name, O_CREAT, 0600, 1);
+    sem_enter(sem_id);
+    
+    int ret = -1;
+    user_info* user_status = (user_info*)shmem;
+    for(int i=0; i<REGISTERED_USERS; i++){
+        if(user_status[i].username.compare(username) == 0){
+            log("Found username " + username + " in the datastore with user_id " + to_string(i));
+            ret = i;
+            break;
+        }
+    }
+    sem_exit(sem_id);
+    return ret;
+}
 // ---------------------------------------------------------------------
 // FUNCTIONS of INTER-PROCESS COMMUNICATION
 // ---------------------------------------------------------------------
@@ -223,25 +178,19 @@ void initialize_user_info(user_info* user_status){
 int relay_write(int to_user_id, msg_to_relay &msg){
     log("Entering relay_write for " + to_string(to_user_id));
 
-    //Obtain the key of the message queue
-    //string key_string = get_key_message_queue(to_user_id);    
-    //if(key_string == "")
-    //    errorHandler(GEN_ERR);
+    msg.type = to_user_id + 1;
+    
 
-    msg.type = to_user_id;
-
-     
     //Write to the message queue
     key_t key = ftok(message_queue_name, 65); 
-    log("Key of ftok returned is " + to_string(key));
-
+    vlog("Key of ftok returned is " + to_string(key));
     int msgid = msgget(key, 0666 | IPC_CREAT);
-    log("msgid is " + to_string(key));
+    vlog("msgid is " + to_string(msgid));
 
-    msgsnd(msgid, &msg, sizeof(msg), 0);
+    msgsnd(msgid, &msg, sizeof(msg_to_relay), 0);
 
-    string tmp(msg.buffer);
-    log("Sent to relay " + tmp);
+    log("Relaying: ");
+    BIO_dump_fp(stdout, (const char*)msg.buffer, sizeof(msg_to_relay));
 
     return 0;
 }
@@ -251,21 +200,25 @@ int relay_write(int to_user_id, msg_to_relay &msg){
  * @return -1 if no message has been read otherwise return the bytes copied
  **/
 int relay_read(int user_id, msg_to_relay &msg, bool blocking){
-    int ret;
+    int ret = -1;
     log("Entering relay_read of " + to_string(user_id));
-    
-    // //Obtain the key of the message queue
-    // string key_string = get_key_message_queue(user_id);
-    //
-    // if(key_string == "")
-    //     errorHandler(GEN_ERR);
-    
+    log((blocking? "blocking": "no_wait"));
+
     //Read from the message queue
-    key_t key = ftok(message_queue_name, 65); //TODO: control meaning
+    key_t key = ftok(message_queue_name, 65); 
+    vlog("Key of ftok returned is " + to_string(key));
+    msg.type = 0;
     int msgid = msgget(key, 0666 | IPC_CREAT);
-    ret = msgrcv(msgid, &msg, sizeof(msg), 1, (blocking? 0: IPC_NOWAIT));
-    if(ret != -1)
-        log("Received from relay " + std::string(msg.buffer));
+    vlog("msgid is " + to_string(msgid));
+    
+    ret = msgrcv(msgid, &msg, sizeof(msg), user_id+1, (blocking? 0: IPC_NOWAIT));
+    if(ret != -1){
+        log("ret: " + to_string(ret));   
+        log("Received from relay: ");
+        BIO_dump_fp(stdout, (const char*)msg.buffer, sizeof(msg_to_relay));
+    } else {
+        log("read nothing");
+    }
     
     return ret;
 }
@@ -285,31 +238,47 @@ int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& re
     log("CHAT opcode arrived");
     // Consuming the receiving buffer
     int peer_user_id;
-    int ret = recv(comm_socket_id, (void *)&peer_user_id, sizeof(int), 0);
+    int peer_user_id_net;
+    int ret = recv(comm_socket_id, (void *)&peer_user_id_net, sizeof(int), 0);
+    peer_user_id = ntohl(peer_user_id_net);
 
+    // uint32_t peer_user_id_to_relay;
+    unsigned char chat_cmd = CHAT_CMD;
+    // int ret = recv(comm_socket_id, (void *)&peer_user_id_to_relay, sizeof(int), 0);
+    
     if (ret < 0)
         errorHandler(REC_ERR);
-    if (ret == 0)
+    if (ret == 0){
         vlog("No message from the server");
+        exit(1);
+    }
+
+    // peer_user_id = ntohl(peer_user_id_to_relay);
     
-    cout << "Request for chatting with user id " << peer_user_id << " arrived " << endl;
+    log("Request for chatting with user id " +  to_string(peer_user_id) + " arrived ");
+    log("Request for chatting with user id to relay " +  to_string(peer_user_id) + " arrived ");
     
-    //Set up user datastore to notify the other process
-    // set_user_to_relay(client_user_id,client_user_id);
-    print_user_data_store();
+    memcpy((void*)relay_msg.buffer, (void*)&chat_cmd, 1);
+    memcpy((void*)(relay_msg.buffer + 1), (void*)&peer_user_id, sizeof(int));
 
     
     //If no other request of notification send the message to the other process through his message queue
-    relay_write(client_user_id, relay_msg);
+    vlog("Handle chat request (2)");
+    relay_write(peer_user_id, relay_msg);
 
     //Wait for response to the own named message queue (blocking)
+    vlog("Handle chat request (3)");
     relay_read(client_user_id, relay_msg, true);
 
+    vlog("Handle chat request (4)");
     // Send reply of the peer to the client
-    // ret = send(comm_socket_id, replyToSend, total_space_to_allocate, 0);
-    // if(ret < 0 || ret!=total_space_to_allocate)
-    //     errorHandler(SEND_ERR);
+    ret = send(comm_socket_id, relay_msg.buffer, 5, 0);
+    if(ret < 0 || ret!=5)
+        errorHandler(SEND_ERR);
     
+    log("Sent to client: ");    
+    BIO_dump_fp(stdout, (const char*)relay_msg.buffer, strlen(relay_msg.buffer));
+
     return 0;    
 }
 
@@ -386,12 +355,54 @@ int handle_get_online_users(int comm_socket_id){
     return 0;    
 }
 
+/**
+ * @brief handle authentication with the client
+ * @return user_id of the client or -1 if not present in the user store or in case of errors
+ */
+int handle_client_authentication(int comm_socket_id){
+    int ret;
+    uint16_t size;
+    ret = recv(comm_socket_id, (void *)&size, sizeof(uint16_t), 0);
+    if (ret < 0)
+        errorHandler(REC_ERR);
+    if (ret == 0){
+        vlog("No message from the server");
+        exit(1);
+    }
+
+    size = ntohs(size);
+    log("Received username size: " + to_string(size));
+    char* username = (char*)malloc(sizeof(char)*size);
+    if(!username)
+        errorHandler(MALLOC_ERR);
+
+    ret = recv(comm_socket_id, (void *)username, size, 0);
+    if (ret < 0)
+        errorHandler(REC_ERR);
+    if (ret == 0){
+        vlog("No message from the server");
+        exit(1);
+    }
+    
+    string client_username(username);
+    log("Received username: " + client_username);
+    
+    set_user_socket(client_username, comm_socket_id); //to test the client
+    
+    //Check if present in the user_datastore
+    return get_user_id_by_username(client_username);
+}
 
 /**
  *  @brief Removes traces of other execution due to the utilization of "named" data structures (semaphores and pipes) that can survive
  */
 void prior_cleanup(){
     sem_unlink(sem_user_store_name); //Remove traces of usage for older execution  
+    key_t key = ftok(message_queue_name, 65); 
+    vlog("Key of ftok returned is " + to_string(key));
+    int msgid = msgget(key, 0666 | IPC_CREAT);
+    vlog("msgid is " + to_string(msgid));
+    msgctl(msgid, IPC_RMID, NULL);
 }
 
 
@@ -406,9 +417,6 @@ int main()
     user_info user_status[REGISTERED_USERS];
     initialize_user_info(user_status);
     memcpy(shmem, user_status, sizeof(user_info)*REGISTERED_USERS);
-    set_user_socket("alice", 100); //to test the client
-    set_user_socket("bob", 100); //to test the client
-    set_user_socket("dave", 100); //to test the client
     
     msg_to_relay relay_msg;
     int ret;
@@ -416,6 +424,7 @@ int main()
     struct sockaddr_in srv_addr, cl_addr;   //address informations
     //char send_buffer[1024];                 //buffer for sending replies
     pid_t pid;                              
+    int client_user_id;
 
     //Preparation of ip address struct
     memset(&srv_addr, 0, sizeof(srv_addr));
@@ -433,9 +442,11 @@ int main()
     inet_pton(AF_INET, srv_ipv4, &srv_addr.sin_addr);
     log("address struct preparation...");
 
-    if (-1 == bind(listen_socket_id, (struct sockaddr *)&srv_addr, sizeof(srv_addr)))
+    if (-1 == bind(listen_socket_id, (struct sockaddr *)&srv_addr, sizeof(srv_addr))){
+        perror(strerror(errno));
         errorHandler(BIND_ERR);
-
+    }
+        
     if (-1 == listen(listen_socket_id, SOCKET_QUEUE))
         errorHandler(LISTEN_ERR);
 
@@ -456,8 +467,11 @@ int main()
             /*
             * HANDLE AUTH and UPDATE USER DATA STORE
             */
-            string client_username = "alice";
-            int client_user_id = 0;
+            client_user_id = handle_client_authentication(comm_socket_id);
+            if(client_user_id == -1){
+                errorHandler(AUTHENTICATION_ERR);
+            }
+
 
             //Child process
             while (true)
@@ -468,15 +482,19 @@ int main()
                 /*
                 * Control if there is a need to relay by checking if our entry is okay
                 */
+                
                 if(relay_read(client_user_id, relay_msg, false) != -1){
                     log("Found request to relay");
                     
                     // Send reply of the peer to the client
-                    // ret = send(comm_socket_id, replyToSend, total_space_to_allocate, 0);
-                    // if(ret < 0 || ret!=total_space_to_allocate)
-                    //     errorHandler(SEND_ERR);
-                }
+                    ret = send(comm_socket_id, relay_msg.buffer, 5, 0);
+                    if(ret < 0 || ret!=5)
+                        errorHandler(SEND_ERR);
 
+                    log("Sent to client : ");    
+                    BIO_dump_fp(stdout, (const char*)relay_msg.buffer, ret);
+                }
+                
 
                 //Get Opcode from the client
                 ret = recv(comm_socket_id, (void *)&msgOpcode, sizeof(char), 0);

@@ -15,6 +15,7 @@
 
 using namespace std;
 
+//---------------- GLOBAL VARIABLES ------------------//
 /* This global variable is setted to true if the user is in chat with 
  * another client, to false otherwise*/
 bool isChatting = false;
@@ -22,9 +23,10 @@ bool isChatting = false;
 /* This global variable is setted to true when an error occurs*/
 bool error = false;
 
-/* Username of the "logged" user*/
-string loggedUser;
+/* ID of the "logged" user*/
+int loggedUserID;
 
+//---------------- STRUCTURES ------------------//
 struct commandMSG
 {
     uint8_t opcode;
@@ -45,6 +47,7 @@ struct user
     size_t usernameSize;
     user* next;
 };
+
 
 /**
  * @brief Print the welcome message
@@ -105,7 +108,7 @@ uint8_t commandStringHandler(string cmd)
 int chat(struct commandMSG* toSend)
 {
     toSend->opcode = CHAT_CMD; 
-    cout << " Write the username of the user that you want to contact" << endl;
+    cout << " Write the userID of the user that you want to contact" << endl;
     printf(" > ");
     cin >> toSend->userId;
     return 0;
@@ -124,8 +127,7 @@ void free_list_users(struct user* userlist)
     struct user* toDelete = userlist;
     struct user* nextDeletion = NULL;
 
-    while(toDelete!=NULL)
-    {
+    while(toDelete!=NULL) {
         nextDeletion = toDelete->next;
         free(toDelete->username);
         free(toDelete);
@@ -144,7 +146,6 @@ int retrieveOnlineUsers(int sock_id, user*& user_list)
 {
     if(user_list!=NULL)
         free_list_users(user_list);
-
     unsigned int howMany;
     int ret = recv(sock_id, (void*)&howMany, sizeof(int), 0);  
     howMany = ntohl(howMany);
@@ -152,27 +153,24 @@ int retrieveOnlineUsers(int sock_id, user*& user_list)
     
     if(ret <= 0)
         return -1;
-
     if(howMany==0)
         return 0;
-    
     if(howMany>REGISTERED_USERS)
         return -1;
-  
+
     struct user* current = NULL;
     struct user* tmp = NULL;
 
-    for(int i = 0; i<howMany; i++)
-    {
+    for(int i = 0; i<howMany; i++) {
         cout << " DBG - i: " << i << endl;
         int username_size;
         tmp = (struct user*)malloc(sizeof(user));
 
-        if(!tmp)
-        {
+        if(!tmp) {
             cout << "Malloc failed " << endl; 
             return -1;
         }
+
         tmp->username = NULL;
         tmp->userId = -1;
         tmp->next = NULL;
@@ -181,16 +179,14 @@ int retrieveOnlineUsers(int sock_id, user*& user_list)
         ret = recv(sock_id, (void*)&(tmp->userId), sizeof(int), 0);  
         tmp->userId = ntohl(tmp->userId);
         cout << " DBG - User id: " << tmp->userId << endl;
-        if(ret <= 0)
-        {
+        if(ret <= 0) {
             free(tmp);
             free_list_users(user_list);
             return -1;
         }
 
         ret = recv(sock_id, (void*)&username_size, sizeof(int), 0);  
-        if(ret <= 0)
-        {
+        if(ret <= 0) {
             free(tmp);
             free_list_users(user_list);
             return -1;
@@ -198,9 +194,7 @@ int retrieveOnlineUsers(int sock_id, user*& user_list)
         username_size = ntohl(username_size);
         cout << " DBG - Username size: " << username_size << endl;
         tmp->usernameSize = username_size;
-
-        if(username_size>MAX_USERNAME_SIZE)
-        {
+        if(username_size>MAX_USERNAME_SIZE) {
             free(tmp);
             free_list_users(user_list);
             return -1;
@@ -208,25 +202,20 @@ int retrieveOnlineUsers(int sock_id, user*& user_list)
 
         tmp->username = (unsigned char*)malloc(username_size+1);
         ret = recv(sock_id, (void*)(tmp->username), username_size, 0);  
-        if(ret <= 0)
-        {   
+        if(ret <= 0) {   
             free(tmp->username);
             free(tmp);
             free_list_users(user_list);
             return -1;
         }
-        
         tmp->username[username_size] = '\0';
-
         cout << " DBG - Username: " << tmp->username << endl;
         if(i==0)
             user_list = tmp;
         else
-            current->next = tmp;
-        
+            current->next = tmp;  
         current = tmp;    
     }
-
     return howMany;
 }
 
@@ -239,23 +228,18 @@ int retrieveOnlineUsers(int sock_id, user*& user_list)
  */
 int print_list_users(user* userlist)
 {
-    //cout << "print_list_users" << endl; 
-    if(userlist==NULL)
-    {
+    if(userlist==NULL) {
         cout << " Warning: userlist is null " << endl;
         return -1;
     }
-
     struct user* tmp = userlist;
     cout << " **** USER LIST **** " << endl;
     cout << "  ID \t Username" << endl;
-    while(tmp!=NULL)
-    {
+    while(tmp!=NULL) {
         cout << "  " << tmp->userId << " \t " << tmp->username << endl;
         tmp = tmp->next;
     }
     cout << " ****************** " << endl;
-
     return 0;
 }
 
@@ -268,17 +252,13 @@ int print_list_users(user* userlist)
  */
 string getUsernameFromID(int userId, user* userlist)
 { 
-    if(userlist==NULL)
-    {
+    if(userlist==NULL) {
         cout << " Warning: userlist is null " << endl;
         return NULL;
     }
-
     struct user* tmp = userlist;
-    while(tmp!=NULL)
-    {
-        if(tmp->userId==userId)
-        {
+    while(tmp!=NULL) {
+        if(tmp->userId==userId) {
             //strncpy((char*)username, (char*)tmp->username, tmp->usernameSize);  
             string username ((char*)(tmp->username)); 
             return username;
@@ -297,16 +277,18 @@ string getUsernameFromID(int userId, user* userlist)
  * */
 int send_command_to_server(int sock_id, commandMSG* cmdToSend)
 {
+    uint32_t net_id;
     int ret = send(sock_id,(void*)&cmdToSend->opcode, sizeof(uint8_t), 0);
     if(ret < 0 || ret!=sizeof(uint8_t))
         return -1;
                 
-    if(cmdToSend->opcode==CHAT_CMD)
-    {
-        ret = send(sock_id,(void*)&cmdToSend->userId, sizeof(int), 0);
-        if(ret < 0 || ret!=sizeof(int))
+    if(cmdToSend->opcode==CHAT_CMD) {
+        net_id = htonl(cmdToSend->userId);
+        ret = send(sock_id,(void*)&net_id, sizeof(uint32_t), 0);
+        if(ret < 0 || ret!=sizeof(uint32_t))
             return -1;
     }
+    cout << " DBG - I have sent " << cmdToSend->opcode << " " << cmdToSend->userId << " aka " << net_id << endl;
     return 0;
 }
 
@@ -366,11 +348,29 @@ int receive_message(int sock_id, string msg)
     return 0;
 }
 
+/**
+ * @brief It performs the authentication procedure with the server
+ * 
+ * @param sock_id socket id
+ * @return int 
+ */
 int authentication(int sock_id)
 {
-    // This function will contain the authentication procedure
-    // performed between client and server. For now we have a simplified version
-    bool tooBig = false;
+    bool tooBig = false;    // indicates if the username inserted by the user is too big
+    string loggedUser;      // string which contains the user's username
+    int nonce;              // nonce R
+    int server_nonce;       // nonce R2 from the server
+    uint16_t usernameSize;
+    uint16_t net_usernameSize;
+    unsigned char opcode = AUTH;
+    uint16_t size_to_allocate;
+    size_t msg_bytes_written;          // how many byte of the messagge I have been how_many_bytes_in_msg
+    int ret;
+    char* name = NULL;
+    unsigned char* msg_auth_1;
+    unsigned char srv_op;
+
+    // Acquire the username from stdin
     do{
         if(tooBig)
             cout << " The username inserted is too big! " << endl;
@@ -381,11 +381,67 @@ int authentication(int sock_id)
             tooBig = true;
     }while(tooBig);
 
+    /*
+     * M1 - Send R,username to the server
+     */
+
+
+/*  nonce = 2; // FOR NOW - THIS MUST BE CHANGED
+
+
+
+
+    usernameSize = loggedUser.size()+1;
+    name = (char*)malloc(usernameSize);
+    if(!name)
+        return -1;
+    net_usernameSize = htons(usernameSize);
+    strncpy(name, loggedUser.c_str(), usernameSize);
+    name[usernameSize-1] = '\0'; // to avoid error in strncpy
+    // Compose the message: OPCODE, R, USERNAME_SIZE, USERNAME
+    size_to_allocate = sizeof(unsigned char)+sizeof(int)+sizeof(uint16_t)+usernameSize;
+    msg_auth_1 = malloc(size_to_allocate);
+    if(!msg_auth_1)
+        return -1;
+    memcpy(msg_auth_1, &opcode, sizeof(unsigned char));
+    msg_bytes_written = sizeof(unsigned char);
+    memcpy(msg_auth_1+msg_bytes_written, &nonce, sizeof(int));
+    msg_bytes_written += sizeof(int);
+    memcpy(msg_auth_1+msg_bytes_written, &net_usernameSize, sizeof(uint16_t));
+    msg_bytes_written += sizeof(uint16_t);
+    memcpy(msg_auth_1+msg_bytes_written, name, usernameSize);
+    msg_bytes_written += usernameSize;
+    // Send the message to the server
+    ret = send(sock_id, (void*)&msg_auth_1, msg_bytes_written, 0);
+    if(ret<=0 || ret != msg_bytes_written)
+        return -1;
+    // free message and unnecessary stuff
+    free(msg_auth_1);
+    free(name);
+*/
+    /*
+     * M2 - Wait for message from the server (with the server DHPubKey, the nonce and the certificate)
+     */
+ /*   ret = recv(sock_id, (void*)&srv_op, sizeof(unsigned char), 0);  
+    if(ret <= 0)
+        return -1;
+    if(srv_op!=AUTH)
+        return -1;
+*/
+
+    /*
+     * M3 - Send to the server my DHpubKey and the nonce R2
+     */
+
+    /*
+     * Derive the session key through the master secret
+     */
+
     // For now the authentication phase consists in sending the username to the server
     // first - send the size
     uint16_t stringsize = loggedUser.size()+1;
     uint16_t net_stringsize = htons(stringsize);
-    int ret = send(sock_id, (void*)&net_stringsize, sizeof(uint16_t), 0);
+    ret = send(sock_id, (void*)&net_stringsize, sizeof(uint16_t), 0);
     if(ret<=0 || ret != sizeof(uint16_t))
         return -1;
 
@@ -394,43 +450,38 @@ int authentication(int sock_id)
     if(ret<=0 || ret != stringsize)
         return -1;
     
+    // At the end of the authentication the server will send the id that he is assigned to me
+    // ret = recv(sock_id, (void*)&loggedUserID, sizeof(int), 0);  
+    // if(ret <= 0)
+    //     return -1;
+
     // For now let's assume that the authentication has been succesfully executed
     return 0;
 }
 
 int main(int argc, char* argv[])
 {     
-    int sock_id;                // socket id
-    int len;                    // size message
-    int size;                   // server response size
-    int ret;                    // var to store function return value
-    uint16_t sizeMsgServer;     // size msg server on the net
-
-    uint8_t commandCode = NOT_VALID_CMD;
-
+    int sock_id;                            // socket id
+    int len;                                // size message
+    int size;                               // server response size
+    int ret;                                // var to store function return value
+    uint16_t sizeMsgServer;                 // size msg server on the net
+    uint8_t commandCode = NOT_VALID_CMD;    // variable that will contain the opcode od the last commande issued by the user
+    user* user_list = NULL;                 // pointer to the list of online users
+    string counterpart;                     // username of the user involved in chat with me
     // Data structure which represents a generic message
     struct genericMSG msgGenToSend;
     msgGenToSend.opcode = MSG;
     msgGenToSend.payload = NULL;
     msgGenToSend.length = 0;
-
     // Data structure which represents a command message
     struct commandMSG cmdToSend;
     cmdToSend.opcode = NOT_VALID_CMD;
     cmdToSend.userId = -1;
-
-    // pointer to the list of online users
-    user* user_list = NULL;
-
-    // username of the user involved in chat with me
-    string counterpart;
-
+    // net structure and info
     struct sockaddr_in srv_addr;
-    char* risp;
-    
     const char* srv_ip = "127.0.0.1";
-    const int srv_port = 4242;
-   
+    const int srv_port = 4242;  
     // Socket creation
     sock_id = socket(AF_INET, SOCK_STREAM, 0);
     if(sock_id<0){
@@ -438,14 +489,12 @@ int main(int argc, char* argv[])
         errorHandler(CONN_ERR);
         goto close_all;
     }
-    
     // Initialization for server address
     if(!memset(&srv_addr, 0, sizeof(srv_addr))){
         error = true;
         errorHandler(GEN_ERR); 
         goto close_all;
     }
-
     srv_addr.sin_family = AF_INET;
     srv_addr.sin_port = htons(srv_port);
     ret = inet_pton(AF_INET, srv_ip, &srv_addr.sin_addr);
@@ -461,31 +510,27 @@ int main(int argc, char* argv[])
         errorHandler(CONN_ERR);
         goto close_all;
     }
-    
+
+    // Welcome page
     welcome();
 
-   
+    // Authentication phase
     ret = authentication(sock_id);
-    if(ret<0)
-    {
+    if(ret<0) {
         error = true;
         errorHandler(AUTHENTICATION_ERR);
         goto close_all;
     }
-
     cout << " --- AUTHENTICATION DONE --- " << endl;
 
-    while(true)
-    {
+    while(true) {
         // Read msg from the std input
         string userInput;
         cout << endl;
         printf(" > ");
         cin >> userInput;
         cout << endl;
-
-        if(!isChatting || (isChatting==true && userInput.compare("!stop_chat")))
-        {
+        if(!isChatting || (isChatting==true && userInput.compare("!stop_chat"))) {
             /* ****************************************
              *          COMMAND SECTION
              * *****************************************/
@@ -495,7 +540,7 @@ int main(int argc, char* argv[])
             {
                 case CHAT_CMD:
                     ret = chat(&cmdToSend);
-                    if(ret<0){
+                    if(ret<0) {
                         error = true;
                         errorHandler(GEN_ERR);
                         goto close_all;
@@ -526,10 +571,9 @@ int main(int argc, char* argv[])
                 default:
                     cout << "Command Not Valid" << endl;
                 break;
-            }
+            }            
         }
-        else
-        {
+        else {
              /* ****************************************
              *          CHAT SECTION
              * *****************************************/
@@ -537,25 +581,21 @@ int main(int argc, char* argv[])
             msgGenToSend.opcode = MSG;
             msgGenToSend.length = userInput.size();
             msgGenToSend.payload = (unsigned char*)malloc(msgGenToSend.length);
-            if(!msgGenToSend.payload){
+            if(!msgGenToSend.payload) {
                 error = true;
                 errorHandler(MALLOC_ERR);
                 goto close_all;
             }
-
             strncpy((char*)msgGenToSend.payload, userInput.c_str(), userInput.size());  
         }
-
         /* ********************************
          *  COMMUNICATIONS WITH SERVER 
          * ********************************/
-        if(commandCode!=HELP_CMD) // I have to send nothing to the server if the command is help
-        {
+        if(commandCode!=HELP_CMD) { // I have to send nothing to the server if the command is help
              /* ****************************************
              *          SEND TO THE SERVER SECTION
              * *****************************************/
-            if(isChatting && cmdToSend.opcode!=STOP_CHAT)
-            {
+            if(isChatting && cmdToSend.opcode!=STOP_CHAT) {
                 cout << " DBG - Sending message <" << msgGenToSend.payload << "> of length <" << msgGenToSend.length << endl;
                 ret = send_message(sock_id, &msgGenToSend);
                 if(ret!=0){
@@ -565,8 +605,7 @@ int main(int argc, char* argv[])
                 }
                 cout << " DBG -  Message sent " << endl;
             }
-            else
-            {
+            else {
                 // Send the command message to the server
                 cout << " DBG - I have to sent a command message to the server ... " << endl;
                 ret = send_command_to_server(sock_id, &cmdToSend);
@@ -577,13 +616,10 @@ int main(int argc, char* argv[])
                 }
                 cout << " DBG - Command to server sent" << endl;
             }
-            
-
             /* ****************************************
              *      RECEIVE FROM THE SERVER SECTION
              * *****************************************/
             cout << " DBG - wait for server response" << endl;
-
             // I read the first byte to understand which type of message the server is sending to me
             uint8_t op;
             ret = recv(sock_id, (void*)&op, sizeof(uint8_t), 0);  
@@ -592,7 +628,6 @@ int main(int argc, char* argv[])
                 errorHandler(REC_ERR);
                 goto close_all;
             }
-
             /* ****************************************************************
              * Action to perform considering the things sent from the server
              * ****************************************************************/
@@ -641,8 +676,7 @@ int main(int argc, char* argv[])
                         goto close_all;
                     }
                     
-                    if(cmdToSend.userId!=counterpart_id)
-                    {
+                    if(cmdToSend.userId!=counterpart_id) {
                         cout << " Server internal error: the user id requested and the one available does not match" << endl;
                         break;
                     }
@@ -683,10 +717,8 @@ int main(int argc, char* argv[])
                 break;
             }
         }
-    
         if(commandCode==EXIT_CMD)
             break;
-        
     }
 
 close_all:
