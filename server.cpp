@@ -44,7 +44,7 @@ struct msg_to_relay{
 
 //Parameters of connection
 const char *srv_ipv4 = "127.0.0.1";
-const int srv_port = 4241;
+const int srv_port = 4242;
 
 //Handling mutual exclusion for accessing the user datastore
 const char* sem_user_store_name = "/user_store";

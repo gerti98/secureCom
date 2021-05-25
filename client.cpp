@@ -451,9 +451,9 @@ int authentication(int sock_id)
         return -1;
     
     // At the end of the authentication the server will send the id that he is assigned to me
-    ret = recv(sock_id, (void*)&loggedUserID, sizeof(int), 0);  
-    if(ret <= 0)
-        return -1;
+    // ret = recv(sock_id, (void*)&loggedUserID, sizeof(int), 0);  
+    // if(ret <= 0)
+    //     return -1;
 
     // For now let's assume that the authentication has been succesfully executed
     return 0;
@@ -515,13 +515,13 @@ int main(int argc, char* argv[])
     welcome();
 
     // Authentication phase
-    /*ret = authentication(sock_id);
+    ret = authentication(sock_id);
     if(ret<0) {
         error = true;
         errorHandler(AUTHENTICATION_ERR);
         goto close_all;
     }
-    cout << " --- AUTHENTICATION DONE --- " << endl;*/
+    cout << " --- AUTHENTICATION DONE --- " << endl;
 
     while(true) {
         // Read msg from the std input
