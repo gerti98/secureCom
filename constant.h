@@ -37,6 +37,7 @@
 #define CHAT_NEG        0x08
 #define STOP_CHAT       0x09
 #define CHAT_RESPONSE   0x0A
+#define AUTH            0x0B
 
 /*
  *  SIZE COSTANT

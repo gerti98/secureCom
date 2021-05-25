@@ -285,7 +285,9 @@ int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& re
     log("CHAT opcode arrived");
     // Consuming the receiving buffer
     int peer_user_id;
-    int ret = recv(comm_socket_id, (void *)&peer_user_id, sizeof(int), 0);
+    int peer_user_id_net;
+    int ret = recv(comm_socket_id, (void *)&peer_user_id_net, sizeof(int), 0);
+    peer_user_id = ntohl(peer_user_id_net);
 
     if (ret < 0)
         errorHandler(REC_ERR);
