@@ -1,6 +1,7 @@
 #include <arpa/inet.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 #include <netinet/in.h>
 #include <string.h>
 #include <stdio.h>
@@ -9,11 +10,16 @@
 #include <iostream>
 #include <vector>
 #include <climits>
+#include <unistd.h>
 #include "constant.h"
 #include "util.h"
 
 
 using namespace std;
+
+typedef void (*sighandler_t)(int);
+
+
 
 //---------------- GLOBAL VARIABLES ------------------//
 /* This global variable is setted to true if the user is in chat with 
@@ -25,6 +31,10 @@ bool error = false;
 
 /* ID of the "logged" user*/
 int loggedUserID;
+
+ /* socket id*/
+int sock_id;                           
+
 
 //---------------- STRUCTURES ------------------//
 struct commandMSG
@@ -48,6 +58,8 @@ struct user
     user* next;
 };
 
+/* pointer to the list of online users*/
+user* user_list = NULL;
 
 /**
  * @brief Print the welcome message
@@ -93,7 +105,7 @@ uint8_t commandStringHandler(string cmd)
         return CHAT_CMD;
     else if(cmd.compare("!help")==0)
         return HELP_CMD;
-    else if(cmd.compare("!stop_chat"))
+    else if(cmd.compare("!stop_chat")==0)
         return STOP_CHAT;
     else
         return NOT_VALID_CMD;
@@ -288,7 +300,7 @@ int send_command_to_server(int sock_id, commandMSG* cmdToSend)
         if(ret < 0 || ret!=sizeof(uint32_t))
             return -1;
     }
-    cout << " DBG - I have sent " << cmdToSend->opcode << " " << cmdToSend->userId << " aka " << net_id << endl;
+    cout << " DBG - I have sent " << (uint16_t)cmdToSend->opcode << " " << cmdToSend->userId << " aka " << net_id << endl;
     return 0;
 }
 
@@ -459,15 +471,76 @@ int authentication(int sock_id)
     return 0;
 }
 
+/**
+ * @brief Handler that handles the SIG_ALARM, this represents the fact that every REQUEST_CONTROL_TIME the client must control for chat request
+ *
+ * 
+ * @param sig 
+ */
+void signal_handler(int sig)
+{
+    // Se viene chiamato durante una comunicazione durante client e server rompe tutto perchè la listen legge un byte dal
+    // socket
+    cout << " DBG - Received signal for controlling the chat request from the server" << endl;
+    uint8_t opcode = NOT_VALID_CMD;
+    uint8_t response;
+    int id_cp;
+    string counterpart;
+    char user_resp = 'a';
+
+    int ret = recv(sock_id, (void*)&opcode, sizeof(uint8_t), MSG_DONTWAIT); 
+    if(ret <= 0){
+        cout << " DBG - nothing received " << endl;
+        alarm(REQUEST_CONTROL_TIME);
+        return;
+    }
+
+    if(opcode!=CHAT_CMD){
+        cout << " DBG - wrong opcode: " << (uint16_t)opcode << endl;
+        alarm(REQUEST_CONTROL_TIME);
+        return;
+    }
+    
+    if(isChatting){
+        // Automatic response
+        response = CHAT_NEG;
+        ret = send(sock_id, (void*)&response, sizeof(uint8_t), 0);
+        //if(ret<=0 || ret != sizeof(uint8_t))
+        return;
+    }
+
+    ret = recv(sock_id, (void*)&id_cp, sizeof(int), 0); 
+    if(ret <= 0){
+        alarm(REQUEST_CONTROL_TIME);
+        return;
+    }
+    counterpart = getUsernameFromID(id_cp, user_list);
+    if(counterpart.empty())
+        counterpart = "Anonymous";
+
+    cout << "\n Do you want to chat with " << counterpart << " with user id " << id_cp << " ? (y/n)" << endl;
+    while(user_resp!='y' || user_resp!='n') {
+        cin >> user_resp;
+        if(user_resp=='y')
+            response = CHAT_POS;
+        else if (user_resp=='n')
+            response = CHAT_NEG;
+        else    
+            cout << " Wrong format - Please write y if you want to accept, n otherwise " << endl;
+    }
+
+    ret = send(sock_id, (void*)&response, sizeof(uint8_t), 0);
+    alarm(REQUEST_CONTROL_TIME);
+    return;
+}
+
 int main(int argc, char* argv[])
 {     
-    int sock_id;                            // socket id
     int len;                                // size message
     int size;                               // server response size
     int ret;                                // var to store function return value
     uint16_t sizeMsgServer;                 // size msg server on the net
     uint8_t commandCode = NOT_VALID_CMD;    // variable that will contain the opcode od the last commande issued by the user
-    user* user_list = NULL;                 // pointer to the list of online users
     string counterpart;                     // username of the user involved in chat with me
     // Data structure which represents a generic message
     struct genericMSG msgGenToSend;
@@ -523,6 +596,11 @@ int main(int argc, char* argv[])
     }
     cout << " --- AUTHENTICATION DONE --- " << endl;
 
+    // Every REQUEST_CONTROL_TIME seconds a signal is issued to control if the server has sent
+    // a chat request originated from another clientS 
+    signal(SIGALRM, signal_handler);
+    alarm(REQUEST_CONTROL_TIME);
+
     while(true) {
         // Read msg from the std input
         string userInput;
@@ -566,12 +644,21 @@ int main(int argc, char* argv[])
             
                 case NOT_VALID_CMD:
                     cout << "Command Not Valid" << endl;
+                    /***************/
+                    // TEST FOR DEBUG
+                   // cout << " DBG _ in attesa di un opcode " << endl;
+                   // uint8_t op;
+                    //ret = recv(sock_id, (void*)&op, sizeof(uint8_t), 0); 
+                    //cout << " opcode received " << (uint16_t)op << endl;
+                    //goto close_all;
                 break;
             
                 default:
                     cout << "Command Not Valid" << endl;
                 break;
-            }            
+            }  
+
+            cout << " DBG - opcode of the command: " << (uint16_t)commandCode << endl;          
         }
         else {
              /* ****************************************

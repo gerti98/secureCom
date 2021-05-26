@@ -64,6 +64,7 @@
 #define SOCKET_QUEUE 10
 #define REGISTERED_USERS 5
 #define BUFFER_MAX  102400
+#define REQUEST_CONTROL_TIME 60 // seconds
 
 /**************************
 *   CRYPTO CONSTANTS
