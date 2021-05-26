@@ -25,6 +25,10 @@
 
 using namespace std;
 using uchar=unsigned char;
+typedef void (*sighandler_t)(int);
+
+
+
 
 /*
 * socket_id: if equal to -1 the user is not connected to the service
@@ -41,6 +45,11 @@ struct msg_to_relay{
     long type;
     char buffer[1000];
 };
+
+//---------------- GLOBAL VARIABLES ------------------//
+int client_user_id;
+int comm_socket_id;
+msg_to_relay relay_msg;
 
 //Parameters of connection
 const char *srv_ipv4 = "127.0.0.1";
@@ -200,6 +209,9 @@ int relay_write(int to_user_id, msg_to_relay &msg){
  * @return -1 if no message has been read otherwise return the bytes copied
  **/
 int relay_read(int user_id, msg_to_relay &msg, bool blocking){
+    if(blocking)
+        alarm(0);
+
     int ret = -1;
     log("Entering relay_read of " + to_string(user_id) + "[" + (blocking? "blocking": "no_wait") + "]");
 
@@ -218,10 +230,53 @@ int relay_read(int user_id, msg_to_relay &msg, bool blocking){
     } else {
         log("read nothing");
     }
-    
+
+
+    alarm(RELAY_CONTROL_TIME);
     return ret;
 }
 
+
+// ---------------------------------------------------------------------
+// FUNCTIONS of HANDLING SIGNALS
+// ---------------------------------------------------------------------
+
+
+/**
+ * @brief Handler that handles the SIG_ALARM, this represents the fact that every REQUEST_CONTROL_TIME the client must control for chat request
+ * 
+ * @param sig 
+ */
+void signal_handler(int sig)
+{
+    // Se viene chiamato durante una comunicazione durante client e server rompe tutto perchè la listen legge un byte dal
+    // socket
+    cout << " DBG - Received signal for controlling the chat request from the server" << endl;
+
+    int ret;
+    uint8_t opcode = NOT_VALID_CMD;
+    uint8_t response;
+    int id_cp;
+    string counterpart;
+    char user_resp = 'a';
+
+                
+    if(relay_read(client_user_id, relay_msg, false) != -1){
+        log("Found request to relay");
+            
+        // Send reply of the peer to the client
+        ret = send(comm_socket_id, relay_msg.buffer, 5, 0);
+        if(ret < 0 || ret!=5)
+            errorHandler(SEND_ERR);
+
+        log("Sent to client : ");    
+        BIO_dump_fp(stdout, (const char*)relay_msg.buffer, ret);
+    }
+                
+
+    alarm(RELAY_CONTROL_TIME);
+    return;
+}
 
 
 // ---------------------------------------------------------------------
@@ -344,7 +399,13 @@ int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& re
     ret = send(comm_socket_id, relay_msg.buffer, 5, 0);
     if(ret < 0 || ret!=5)
         errorHandler(SEND_ERR);
-    
+
+    /**
+     * 
+     *  WAIT FOR SECOND AUTHENTICATION if CHAT_POS has been sent
+     * 
+    **/
+
     log("Sent to client: ");    
     BIO_dump_fp(stdout, (const char*)relay_msg.buffer, ret);
 
@@ -395,19 +456,16 @@ int handle_chat_neg(int comm_socket_id, msg_to_relay& relay_msg){
     peer_user_id = ntohl(peer_user_id_net);
     unsigned char chat_cmd = CHAT_NEG;
     
-    if (ret < 0)
-        errorHandler(REC_ERR);
-    if (ret == 0){
-        vlog("No message from the server");
-        exit(1);
-    }
+    // if (ret < 0)
+    //     errorHandler(REC_ERR);
+    // if (ret == 0){
+    //     vlog("No message from the server");
+    //     exit(1);
+    // }
 
-    log("Request for chatting with user id " +  to_string(peer_user_id) + " arrived ");
-    
     memcpy((void*)relay_msg.buffer, (void*)&chat_cmd, 1);
-    memcpy((void*)(relay_msg.buffer + 1), (void*)&peer_user_id, sizeof(int));
+    // memcpy((void*)(relay_msg.buffer + 1), (void*)&peer_user_id, sizeof(int));
 
-    log("handle_chat_neg (2)");
     relay_write(peer_user_id, relay_msg);
 
     return 0;
@@ -481,13 +539,13 @@ int main()
     initialize_user_info(user_status);
     memcpy(shmem, user_status, sizeof(user_info)*REGISTERED_USERS);
     
-    msg_to_relay relay_msg;
+
     int ret;
-    int listen_socket_id, comm_socket_id;   //socket indexes
+    int listen_socket_id;   //socket indexes
     struct sockaddr_in srv_addr, cl_addr;   //address informations
     //char send_buffer[1024];                 //buffer for sending replies
     pid_t pid;                              
-    int client_user_id;
+
 
     //Preparation of ip address struct
     memset(&srv_addr, 0, sizeof(srv_addr));
@@ -535,6 +593,10 @@ int main()
                 errorHandler(AUTHENTICATION_ERR);
             }
 
+            // Every REQUEST_CONTROL_TIME seconds a signal is issued to control if the server has sent
+            // a chat request originated from another clientS 
+            signal(SIGALRM, signal_handler);
+            alarm(RELAY_CONTROL_TIME);
 
             //Child process
             while (true)

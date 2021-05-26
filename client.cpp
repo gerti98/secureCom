@@ -519,7 +519,7 @@ void signal_handler(int sig)
         counterpart = "Anonymous";
 
     cout << "\n Do you want to chat with " << counterpart << " with user id " << id_cp << " ? (y/n)" << endl;
-    while(user_resp!='y' || user_resp!='n') {
+    while(user_resp!='y' && user_resp!='n') {
         cin >> user_resp;
         if(user_resp=='y')
             response = CHAT_POS;
