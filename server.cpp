@@ -201,8 +201,7 @@ int relay_write(int to_user_id, msg_to_relay &msg){
  **/
 int relay_read(int user_id, msg_to_relay &msg, bool blocking){
     int ret = -1;
-    log("Entering relay_read of " + to_string(user_id));
-    log((blocking? "blocking": "no_wait"));
+    log("Entering relay_read of " + to_string(user_id) + "[" + (blocking? "blocking": "no_wait") + "]");
 
     //Read from the message queue
     key_t key = ftok(message_queue_name, 65); 
@@ -228,59 +227,6 @@ int relay_read(int user_id, msg_to_relay &msg, bool blocking){
 // ---------------------------------------------------------------------
 // FUNCTIONS of HANDLING REPLIES FOR CLIENTS
 // ---------------------------------------------------------------------
-
-
-/**
- *  @brief Handle the response to the client for the !chat command
- *  @return 0 in case of success, -1 in case of error
- */
-int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& relay_msg){
-    log("CHAT opcode arrived");
-    // Consuming the receiving buffer
-    int peer_user_id;
-    int peer_user_id_net;
-    int ret = recv(comm_socket_id, (void *)&peer_user_id_net, sizeof(int), 0);
-    peer_user_id = ntohl(peer_user_id_net);
-
-    // uint32_t peer_user_id_to_relay;
-    unsigned char chat_cmd = CHAT_CMD;
-    // int ret = recv(comm_socket_id, (void *)&peer_user_id_to_relay, sizeof(int), 0);
-    
-    if (ret < 0)
-        errorHandler(REC_ERR);
-    if (ret == 0){
-        vlog("No message from the server");
-        exit(1);
-    }
-
-    // peer_user_id = ntohl(peer_user_id_to_relay);
-    
-    log("Request for chatting with user id " +  to_string(peer_user_id) + " arrived ");
-    log("Request for chatting with user id to relay " +  to_string(peer_user_id) + " arrived ");
-    
-    memcpy((void*)relay_msg.buffer, (void*)&chat_cmd, 1);
-    memcpy((void*)(relay_msg.buffer + 1), (void*)&peer_user_id, sizeof(int));
-
-    
-    //If no other request of notification send the message to the other process through his message queue
-    vlog("Handle chat request (2)");
-    relay_write(peer_user_id, relay_msg);
-
-    //Wait for response to the own named message queue (blocking)
-    vlog("Handle chat request (3)");
-    relay_read(client_user_id, relay_msg, true);
-
-    vlog("Handle chat request (4)");
-    // Send reply of the peer to the client
-    ret = send(comm_socket_id, relay_msg.buffer, 5, 0);
-    if(ret < 0 || ret!=5)
-        errorHandler(SEND_ERR);
-    
-    log("Sent to client: ");    
-    BIO_dump_fp(stdout, (const char*)relay_msg.buffer, strlen(relay_msg.buffer));
-
-    return 0;    
-}
 
 /**
  *  Handle the response to the client for the !users_online command
@@ -341,20 +287,137 @@ int handle_get_online_users(int comm_socket_id){
     }
 
     log("Total length of buffer to send: " + to_string(curr_position));
-    BIO_dump_fp(stdout, (const char*)replyToSend, total_space_to_allocate);
-
+    
     ret = send(comm_socket_id, replyToSend, total_space_to_allocate, 0);
     if(ret < 0 || ret!=total_space_to_allocate){
         free(replyToSend);
         free(user_datastore_copy);
         errorHandler(SEND_ERR);
     }
+
+    log("Sent to client: ");
+    BIO_dump_fp(stdout, (const char*)replyToSend, ret);
         
     free(replyToSend);
     free(user_datastore_copy);
     return 0;    
 }
 
+
+/**
+ *  @brief Handle the response to the client for the !chat command
+ *  @return 0 in case of success, -1 in case of error
+ */
+int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& relay_msg){
+    log("CHAT opcode arrived");
+    // Consuming the receiving buffer
+    int peer_user_id;
+    int peer_user_id_net;
+    int ret = recv(comm_socket_id, (void *)&peer_user_id_net, sizeof(int), 0);
+    peer_user_id = ntohl(peer_user_id_net);
+    unsigned char chat_cmd = CHAT_CMD;
+    
+    if (ret < 0)
+        errorHandler(REC_ERR);
+    if (ret == 0){
+        vlog("No message from the server");
+        exit(1);
+    }
+
+    
+    log("Request for chatting with user id " +  to_string(peer_user_id) + " arrived ");
+    
+    memcpy((void*)relay_msg.buffer, (void*)&chat_cmd, 1);
+    memcpy((void*)(relay_msg.buffer + 1), (void*)&peer_user_id, sizeof(int));
+
+    
+    //If no other request of notification send the message to the other process through his message queue
+    vlog("Handle chat request (2)");
+    relay_write(peer_user_id, relay_msg);
+
+    //Wait for response to the own named message queue (blocking)
+    vlog("Handle chat request (3)");
+    relay_read(client_user_id, relay_msg, true);
+
+    vlog("Handle chat request (4)");
+    // Send reply of the peer to the client
+    ret = send(comm_socket_id, relay_msg.buffer, 5, 0);
+    if(ret < 0 || ret!=5)
+        errorHandler(SEND_ERR);
+    
+    log("Sent to client: ");    
+    BIO_dump_fp(stdout, (const char*)relay_msg.buffer, ret);
+
+    return 0;    
+}
+
+
+int handle_chat_pos(int comm_socket_id, msg_to_relay& relay_msg){
+    log("Received CHAT_POS command");
+    int peer_user_id;
+    int peer_user_id_net;
+    int ret = recv(comm_socket_id, (void *)&peer_user_id_net, sizeof(int), 0);
+    peer_user_id = ntohl(peer_user_id_net);
+    unsigned char chat_cmd = CHAT_POS;
+    
+    
+    if (ret < 0)
+        errorHandler(REC_ERR);
+    if (ret == 0){
+        vlog("No message from the server");
+        exit(1);
+    }
+
+    log("Request for chatting with user id " +  to_string(peer_user_id) + " arrived ");
+    
+    memcpy((void*)relay_msg.buffer, (void*)&chat_cmd, 1);
+    memcpy((void*)(relay_msg.buffer + 1), (void*)&peer_user_id, sizeof(int));
+    
+    log("handle_chat_pos (2)");
+    relay_write(peer_user_id, relay_msg);
+
+    /**
+     * 
+     *  WAIT FOR SECOND AUTHENTICATION
+     * 
+    **/
+    
+    log("\n\n... WORK IN PROGRESS ...\n\n");
+    return 0;
+}
+
+
+int handle_chat_neg(int comm_socket_id, msg_to_relay& relay_msg){
+    log("Received CHAT_NEG command");
+    int peer_user_id;
+    int peer_user_id_net;
+    int ret = recv(comm_socket_id, (void *)&peer_user_id_net, sizeof(int), 0);
+    peer_user_id = ntohl(peer_user_id_net);
+    unsigned char chat_cmd = CHAT_NEG;
+    
+    if (ret < 0)
+        errorHandler(REC_ERR);
+    if (ret == 0){
+        vlog("No message from the server");
+        exit(1);
+    }
+
+    log("Request for chatting with user id " +  to_string(peer_user_id) + " arrived ");
+    
+    memcpy((void*)relay_msg.buffer, (void*)&chat_cmd, 1);
+    memcpy((void*)(relay_msg.buffer + 1), (void*)&peer_user_id, sizeof(int));
+
+    log("handle_chat_neg (2)");
+    relay_write(peer_user_id, relay_msg);
+
+    return 0;
+}
+
+int handle_chat_response(int comm_socket_id, msg_to_relay& relay_msg){
+    log("Received CHAT_RESPONSE command");
+    log("\n\n... WORK IN PROGRESS ...\n\n");
+    return 0;
+}
 /**
  * @brief handle authentication with the client
  * @return user_id of the client or -1 if not present in the user store or in case of errors
@@ -519,7 +582,21 @@ int main()
                             errorHandler(GEN_ERR);
                         break;
                     
-                    // case CHAT_POS || CHAT_NEG:
+                    case CHAT_POS:
+                        ret = handle_chat_pos(comm_socket_id, relay_msg);
+                        if(ret<0)
+                            errorHandler(GEN_ERR);
+                        break;
+                    case CHAT_NEG:
+                        ret = handle_chat_neg(comm_socket_id, relay_msg);
+                        if(ret<0)
+                            errorHandler(GEN_ERR);
+                        break;
+                    case CHAT_RESPONSE:
+                        ret = handle_chat_response(comm_socket_id, relay_msg);
+                        if(ret<0)
+                            errorHandler(GEN_ERR);
+                        break;
                         
                     default:
                         cout << "Command Not Valid" << endl;

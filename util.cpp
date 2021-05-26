@@ -10,18 +10,18 @@ using namespace std;
 
 void log(string msg){
     if(VERBOSITY_LEVEL >= 1)
-        cout << "[LOG] " << msg << endl;
+        cout << "[LOG #" << getpid() << "] " << msg << endl;
 }
 
 
 void vlog(string msg){
     if(VERBOSITY_LEVEL >= 2)
-        cout << "[VLOG] " << msg << endl;
+        cout << "[VLOG #" << getpid() << "] " << msg << endl;
 }
 
 void vvlog(string msg){
     if(VERBOSITY_LEVEL >= 3)
-        cout << "[VVLOG] " << msg << endl;
+        cout << "[VVLOG #" << getpid() << "] " << msg << endl;
 }
 
 void errorHandler(uint16_t errorId = GEN_ERR)
