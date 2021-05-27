@@ -573,22 +573,23 @@ cout << " 5 " << endl;
             cout << " Wrong format - Please write y if you want to accept, n otherwise " << endl;
     }
  
-    risp_buff_size = sizeof(uint8_t)+sizeof(int) + (response==CHAT_POS)?PUBKEY_DEFAULT:0;
+    //risp_buff_size = sizeof(uint8_t)+sizeof(int) + (response==CHAT_POS)?PUBKEY_DEFAULT:0;
+    risp_buff_size = sizeof(uint8_t)+sizeof(int); //TEMPORARY
     risp_buff = (unsigned char*)malloc(risp_buff_size);
     if(!risp_buff){
         alarm(REQUEST_CONTROL_TIME);
         // BUFFER OVERFLOW PROBLEM? RETURN IS ENOUGH?
         return;
     }
-    memcpy(risp_buff, (void*)&response, sizeof(uint8_t));
+    memcpy((void*)risp_buff, (void*)&response, sizeof(uint8_t));
     // insert sequence number - not present yet
-    memcpy(risp_buff+1, (void*)&loggedUserID, sizeof(int));
+    memcpy((void*)(risp_buff+1), (void*)&loggedUserID, sizeof(int));
     //if(response==CHAT_POS){
         // send the public key
        // memcpy(risp_buff+5, loggedUserID, sizeof(int));
     //}
 
-    ret = send(sock_id, (void*)&risp_buff, risp_buff_size, 0);
+    ret = send(sock_id, (void*)risp_buff, risp_buff_size, 0);
     free(risp_buff);
     alarm(REQUEST_CONTROL_TIME);
     return;
@@ -836,6 +837,10 @@ int main(int argc, char* argv[])
                     cout << "               CHAT               " << endl;
                     cout << " Send a message to " <<  counterpart << endl;
                 }  
+                break;
+
+                case CHAT_NEG:
+                    cout << " The user has refused the request " << endl;
                 break;
 
                 case CHAT_RESPONSE:
