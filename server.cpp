@@ -43,7 +43,7 @@ struct user_info {
 
 struct msg_to_relay{
     long type;
-    char buffer[1000];
+    char buffer[RELAY_MSG_SIZE];
 };
 
 //---------------- GLOBAL VARIABLES ------------------//
@@ -176,6 +176,26 @@ int get_user_id_by_username(string username){
     sem_exit(sem_id);
     return ret;
 }
+
+
+string get_username_by_user_id(size_t id){
+    log("Entering get username by id");
+    if(id >= REGISTERED_USERS){
+        log(" ERR - User_id not present");
+        errorHandler(GEN_ERR);
+    }
+
+    sem_t* sem_id= sem_open(sem_user_store_name, O_CREAT, 0600, 1);
+    sem_enter(sem_id);
+
+    user_info* user_status = (user_info*)shmem;
+    string username = user_status[id].username;
+    
+    sem_exit(sem_id);
+    return username;
+}
+
+
 // ---------------------------------------------------------------------
 // FUNCTIONS of INTER-PROCESS COMMUNICATION
 // ---------------------------------------------------------------------
@@ -371,7 +391,10 @@ int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& re
     int ret = recv(comm_socket_id, (void *)&peer_user_id_net, sizeof(int), 0);
     peer_user_id = ntohl(peer_user_id_net);
     unsigned char chat_cmd = CHAT_CMD;
-    
+    string client_username = get_username_by_user_id(client_user_id);
+    int client_username_length = client_username.length();
+    int response_length = 5; //TODO: temporary
+
     if (ret < 0)
         errorHandler(REC_ERR);
     if (ret == 0){
@@ -381,9 +404,12 @@ int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& re
 
     
     log("Request for chatting with user id " +  to_string(peer_user_id) + " arrived ");
-    
+    //TODO: add sequence number
     memcpy((void*)relay_msg.buffer, (void*)&chat_cmd, 1);
-    memcpy((void*)(relay_msg.buffer + 1), (void*)&peer_user_id, sizeof(int));
+    memcpy((void*)(relay_msg.buffer + 1), (void*)&client_user_id, sizeof(int));
+    memcpy((void*)(relay_msg.buffer + 5), (void*)&client_username_length, sizeof(int));
+    memcpy((void*)(relay_msg.buffer + 9), (void*)&client_username, client_username_length);
+    //TODO: add pubkey
 
     
     //If no other request of notification send the message to the other process through his message queue
@@ -394,9 +420,13 @@ int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& re
     vlog("Handle chat request (3)");
     relay_read(client_user_id, relay_msg, true);
 
+    //TODO: add sequence number
+    memcpy((void*)(relay_msg.buffer + 1), (void*)&peer_user_id, sizeof(int));    
+
+    
     vlog("Handle chat request (4)");
     // Send reply of the peer to the client
-    ret = send(comm_socket_id, relay_msg.buffer, 5, 0);
+    ret = send(comm_socket_id, relay_msg.buffer, response_length, 0);
     if(ret < 0 || ret!=5)
         errorHandler(SEND_ERR);
 
@@ -413,15 +443,11 @@ int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& re
 }
 
 
-int handle_chat_pos(int comm_socket_id, msg_to_relay& relay_msg){
+int handle_chat_pos(){
     log("Received CHAT_POS command");
     int peer_user_id;
     int peer_user_id_net;
     int ret = recv(comm_socket_id, (void *)&peer_user_id_net, sizeof(int), 0);
-    peer_user_id = ntohl(peer_user_id_net);
-    unsigned char chat_cmd = CHAT_POS;
-    
-    
     if (ret < 0)
         errorHandler(REC_ERR);
     if (ret == 0){
@@ -429,11 +455,17 @@ int handle_chat_pos(int comm_socket_id, msg_to_relay& relay_msg){
         exit(1);
     }
 
+    peer_user_id = ntohl(peer_user_id_net);
+    unsigned char chat_cmd = CHAT_POS;
+    
+
     log("Request for chatting with user id " +  to_string(peer_user_id) + " arrived ");
     
+    //TODO: sequence number
     memcpy((void*)relay_msg.buffer, (void*)&chat_cmd, 1);
     memcpy((void*)(relay_msg.buffer + 1), (void*)&peer_user_id, sizeof(int));
-    
+    //TODO: senderpubkey
+
     log("handle_chat_pos (2)");
     relay_write(peer_user_id, relay_msg);
 
@@ -448,30 +480,29 @@ int handle_chat_pos(int comm_socket_id, msg_to_relay& relay_msg){
 }
 
 
-int handle_chat_neg(int comm_socket_id, msg_to_relay& relay_msg){
+int handle_chat_neg(){
     log("Received CHAT_NEG command");
     int peer_user_id;
     int peer_user_id_net;
     int ret = recv(comm_socket_id, (void *)&peer_user_id_net, sizeof(int), 0);
+    if (ret < 0)
+        errorHandler(REC_ERR);
+    if (ret == 0){
+        vlog("No message from the server");
+        exit(1);
+    }
     peer_user_id = ntohl(peer_user_id_net);
     unsigned char chat_cmd = CHAT_NEG;
-    
-    // if (ret < 0)
-    //     errorHandler(REC_ERR);
-    // if (ret == 0){
-    //     vlog("No message from the server");
-    //     exit(1);
-    // }
 
+    //TODO: sequence number
     memcpy((void*)relay_msg.buffer, (void*)&chat_cmd, 1);
-    // memcpy((void*)(relay_msg.buffer + 1), (void*)&peer_user_id, sizeof(int));
+    memcpy((void*)(relay_msg.buffer + 1), (void*)&peer_user_id, sizeof(int));
 
     relay_write(peer_user_id, relay_msg);
-
     return 0;
 }
 
-int handle_chat_response(int comm_socket_id, msg_to_relay& relay_msg){
+int handle_chat_response(){
     log("Received CHAT_RESPONSE command");
     log("\n\n... WORK IN PROGRESS ...\n\n");
     return 0;
@@ -480,7 +511,7 @@ int handle_chat_response(int comm_socket_id, msg_to_relay& relay_msg){
  * @brief handle authentication with the client
  * @return user_id of the client or -1 if not present in the user store or in case of errors
  */
-int handle_client_authentication(int comm_socket_id){
+int handle_client_authentication(){
     int ret;
     uint16_t size;
     ret = recv(comm_socket_id, (void *)&size, sizeof(uint16_t), 0);
@@ -588,7 +619,7 @@ int main()
             /*
             * HANDLE AUTH and UPDATE USER DATA STORE
             */
-            client_user_id = handle_client_authentication(comm_socket_id);
+            client_user_id = handle_client_authentication();
             if(client_user_id == -1){
                 errorHandler(AUTHENTICATION_ERR);
             }
@@ -645,17 +676,17 @@ int main()
                         break;
                     
                     case CHAT_POS:
-                        ret = handle_chat_pos(comm_socket_id, relay_msg);
+                        ret = handle_chat_pos();
                         if(ret<0)
                             errorHandler(GEN_ERR);
                         break;
                     case CHAT_NEG:
-                        ret = handle_chat_neg(comm_socket_id, relay_msg);
+                        ret = handle_chat_neg();
                         if(ret<0)
                             errorHandler(GEN_ERR);
                         break;
                     case CHAT_RESPONSE:
-                        ret = handle_chat_response(comm_socket_id, relay_msg);
+                        ret = handle_chat_response();
                         if(ret<0)
                             errorHandler(GEN_ERR);
                         break;
