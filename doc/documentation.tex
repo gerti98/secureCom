@@ -161,13 +161,45 @@ anything; if the server try to implement a "man in the middle" attack he will on
 because the protocol is protected by private key signatures. Also in this case, DH keys are discared after 
 the handshake, and future messages are numbered againts reply attacks.
 
+\section{Alghoritms and Protocols}
+\subsection{Public Key Authentication}
+\subsection{Authenticated Encryption}
 \chapter{Messages Format}
+
 \section{Handshake}
-\newpage
-\section{Session}
+\subsection*{Client Server Handshake}
+\begin{figure}[H]
+	\centering
+	\includegraphics[scale=0.19]{img/AuthClientServer_messageFormat.png}
+	\caption{Client Server Handshake Message Format}
+	\label {img: FormatClientServer}
+\end{figure}
+\subsection*{Client Client Handshake}
+\begin{figure}[H]
+	\centering
+	\includegraphics[scale=0.22]{img/AuthClientClient_messageFormat.png}
+	\caption{Client Client Handshake Message Format}
+	\label {img: FormatClientClient}
+\end{figure}
 \newpage
 \section{Commands}
+\subsection*{Client Online List Request and Answer }
+\begin{figure}[H]
+	\centering
+	\includegraphics[scale=0.25]{img/ClientOnline_messageFormat.png}
+	\caption{Client Online Message Format}
+	\label {img: FormatClientOnline}
+\end{figure}
+
+\subsection*{Chat Request and Answers}
+\begin{figure}[H]
+	\centering
+	\includegraphics[scale=0.28]{img/ChatRequest_messageFormat.png}
+	\caption{Chat Request Message Format}
+	\label {img: FormatChatRequest}
+\end{figure}
 \newpage
+
 \section{Chat}
 \begin{figure}[H]
 	\centering
