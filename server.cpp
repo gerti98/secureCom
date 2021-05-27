@@ -190,7 +190,7 @@ string get_username_by_user_id(size_t id){
 
     user_info* user_status = (user_info*)shmem;
     string username = user_status[id].username;
-    
+    log("Obtained username of " + username);
     sem_exit(sem_id);
     return username;
 }
@@ -216,11 +216,10 @@ int relay_write(int to_user_id, msg_to_relay &msg){
     int msgid = msgget(key, 0666 | IPC_CREAT);
     vlog("msgid is " + to_string(msgid));
 
-    msgsnd(msgid, &msg, sizeof(msg_to_relay), 0);
-
     log("Relaying: ");
     BIO_dump_fp(stdout, (const char*)msg.buffer, sizeof(msg_to_relay));
 
+    msgsnd(msgid, &msg, sizeof(msg_to_relay), 0);
     return 0;
 }
 
@@ -271,7 +270,7 @@ void signal_handler(int sig)
 {
     // Se viene chiamato durante una comunicazione durante client e server rompe tutto perchè la listen legge un byte dal
     // socket
-    cout << " DBG - Received signal for controlling the chat request from the server" << endl;
+    log("Received signal for relay_reads");
 
     int ret;
     uint8_t opcode = NOT_VALID_CMD;
@@ -283,10 +282,16 @@ void signal_handler(int sig)
                 
     if(relay_read(client_user_id, relay_msg, false) != -1){
         log("Found request to relay");
-            
+        uchar opcode = *relay_msg.buffer;
+
+        int username_length;
+        memcpy(&username_length, (void*)(relay_msg.buffer + 5), sizeof(int));
+        log("USERNAME LENGTH: " + to_string(username_length));
+        int msg_length = 9 + username_length;
+
         // Send reply of the peer to the client
-        ret = send(comm_socket_id, relay_msg.buffer, 5, 0);
-        if(ret < 0 || ret!=5)
+        ret = send(comm_socket_id, relay_msg.buffer, msg_length, 0);
+        if(ret < msg_length)
             errorHandler(SEND_ERR);
 
         log("Sent to client : ");    
@@ -389,12 +394,6 @@ int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& re
     int peer_user_id;
     int peer_user_id_net;
     int ret = recv(comm_socket_id, (void *)&peer_user_id_net, sizeof(int), 0);
-    peer_user_id = ntohl(peer_user_id_net);
-    unsigned char chat_cmd = CHAT_CMD;
-    string client_username = get_username_by_user_id(client_user_id);
-    int client_username_length = client_username.length();
-    int response_length = 9+client_username_length; //TODO: temporary
-
     if (ret < 0)
         errorHandler(REC_ERR);
     if (ret == 0){
@@ -402,13 +401,22 @@ int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& re
         exit(1);
     }
 
+    peer_user_id = ntohl(peer_user_id_net);
+    unsigned char chat_cmd = CHAT_CMD;
+    string client_username = get_username_by_user_id(client_user_id);
+    int client_username_length = client_username.length();
+    int final_response_length = 5; //TODO: temporary
+    const char* username = client_username.c_str();
+    log(username);
+
     
     log("Request for chatting with user id " +  to_string(peer_user_id) + " arrived ");
     //TODO: add sequence number
     memcpy((void*)relay_msg.buffer, (void*)&chat_cmd, 1);
     memcpy((void*)(relay_msg.buffer + 1), (void*)&client_user_id, sizeof(int));
     memcpy((void*)(relay_msg.buffer + 5), (void*)&client_username_length, sizeof(int));
-    memcpy((void*)(relay_msg.buffer + 9), (void*)&client_username, client_username_length);
+    memcpy((void*)(relay_msg.buffer + 9), (void*)username, client_username_length);
+    BIO_dump_fp(stdout, relay_msg.buffer, final_response_length);
     //TODO: add pubkey
 
     
@@ -426,7 +434,7 @@ int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& re
     
     vlog("Handle chat request (4)");
     // Send reply of the peer to the client
-    ret = send(comm_socket_id, relay_msg.buffer, response_length, 0);
+    ret = send(comm_socket_id, relay_msg.buffer, final_response_length, 0);
     if(ret < 0 || ret!=5)
         errorHandler(SEND_ERR);
 
@@ -459,11 +467,13 @@ int handle_chat_pos(){
     unsigned char chat_cmd = CHAT_POS;
     
 
-    log("Request for chatting with user id " +  to_string(peer_user_id) + " arrived ");
+    log("Chat Positive to send for " +  to_string(peer_user_id) + " arrived ");
     
     //TODO: sequence number
     memcpy((void*)relay_msg.buffer, (void*)&chat_cmd, 1);
     memcpy((void*)(relay_msg.buffer + 1), (void*)&peer_user_id, sizeof(int));
+    BIO_dump_fp(stdout, relay_msg.buffer, 5);
+
     //TODO: senderpubkey
 
     log("handle_chat_pos (2)");
@@ -495,8 +505,11 @@ int handle_chat_neg(){
     unsigned char chat_cmd = CHAT_NEG;
 
     //TODO: sequence number
+    log("Chat Negative to send for " +  to_string(peer_user_id) + " arrived ");
+
     memcpy((void*)relay_msg.buffer, (void*)&chat_cmd, 1);
     memcpy((void*)(relay_msg.buffer + 1), (void*)&peer_user_id, sizeof(int));
+    BIO_dump_fp(stdout, relay_msg.buffer, 5);
 
     relay_write(peer_user_id, relay_msg);
     return 0;
