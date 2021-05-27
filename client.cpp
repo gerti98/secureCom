@@ -58,9 +58,6 @@ struct user
     user* next;
 };
 
-/* pointer to the list of online users*/
-user* user_list = NULL;
-
 /**
  * @brief Print the welcome message
  * 
@@ -479,14 +476,16 @@ int authentication(int sock_id)
  */
 void signal_handler(int sig)
 {
-    // Se viene chiamato durante una comunicazione durante client e server rompe tutto perchè la listen legge un byte dal
-    // socket
+    // Se viene chiamato durante una comunicazione durante client e server rompe tutto perchè la listen legge un byte dal socket
     cout << " DBG - Received signal for controlling the chat request from the server" << endl;
     uint8_t opcode = NOT_VALID_CMD;
     uint8_t response;
     int id_cp;
-    string counterpart;
+    unsigned char* counterpart;
+    size_t size_username;
     char user_resp = 'a';
+    unsigned char* risp_buff = NULL;
+    size_t risp_buff_size = 0;
 
     int ret = recv(sock_id, (void*)&opcode, sizeof(uint8_t), MSG_DONTWAIT); 
     if(ret <= 0){
@@ -501,24 +500,69 @@ void signal_handler(int sig)
         return;
     }
     
-    if(isChatting){
-        // Automatic response
-        response = CHAT_NEG;
-        ret = send(sock_id, (void*)&response, sizeof(uint8_t), 0);
-        //if(ret<=0 || ret != sizeof(uint8_t))
-        return;
-    }
+    cout << " DBG - Received a chat request " << endl;
+    // Reading of sequence number - not present yet
 
+    // Reading of the peer id
     ret = recv(sock_id, (void*)&id_cp, sizeof(int), 0); 
     if(ret <= 0){
+        cout << " DBG - peer id not received " << endl;
         alarm(REQUEST_CONTROL_TIME);
         return;
     }
-    counterpart = getUsernameFromID(id_cp, user_list);
-    if(counterpart.empty())
-        counterpart = "Anonymous";
+    id_cp = ntohl(id_cp);
+    cout << " 2 " << endl;
+    // Read username length
+    ret = recv(sock_id, (void*)&size_username, sizeof(size_t), 0); 
+    if(ret <= 0 || size_username==0){
+        cout << " DBG - username length not received " << endl;
+        alarm(REQUEST_CONTROL_TIME);
+        return;
+    }
+    cout << " 3 " << endl;
+    size_username = ntohl(size_username);
+
+    // Read username peer
+    counterpart = (unsigned char*)malloc(size_username);
+    if(!counterpart){
+        cout << " DBG - malloc error for counterpart " << endl;
+        alarm(REQUEST_CONTROL_TIME);
+        // BUFFER OVERFLOW PROBLEM? RETURN IS ENOUGH?
+        return;
+    }
+    cout << " 4 " << endl;
+    ret = recv(sock_id, (void*)counterpart, size_username, 0); 
+    if(ret <= 0){
+        cout << " DBG - username not received " << endl;
+        alarm(REQUEST_CONTROL_TIME);
+        return;
+    }
+cout << " 5 " << endl;
+    // Read sender pubkey - not present yet
+
+
+    if(isChatting){
+        cout << " DBG - Automatic response because I am chatting " << endl;
+        // Automatic response
+        free(counterpart);
+        risp_buff_size = sizeof(uint8_t)+sizeof(int);
+        risp_buff = (unsigned char*)malloc(risp_buff_size);
+        if(!risp_buff){
+            alarm(REQUEST_CONTROL_TIME);
+            // BUFFER OVERFLOW PROBLEM? RETURN IS ENOUGH?
+            return;
+        }
+        response = CHAT_NEG;
+        memcpy(risp_buff, (void*)&response, sizeof(uint8_t));
+        memcpy(risp_buff+1, (void*)&id_cp, sizeof(int));
+        ret = send(sock_id, (void*)risp_buff, risp_buff_size, 0);
+        free(risp_buff);
+        alarm(REQUEST_CONTROL_TIME);
+        return;
+    }
 
     cout << "\n Do you want to chat with " << counterpart << " with user id " << id_cp << " ? (y/n)" << endl;
+    free(counterpart);
     while(user_resp!='y' && user_resp!='n') {
         cin >> user_resp;
         if(user_resp=='y')
@@ -528,8 +572,24 @@ void signal_handler(int sig)
         else    
             cout << " Wrong format - Please write y if you want to accept, n otherwise " << endl;
     }
+ 
+    risp_buff_size = sizeof(uint8_t)+sizeof(int) + (response==CHAT_POS)?PUBKEY_DEFAULT:0;
+    risp_buff = (unsigned char*)malloc(risp_buff_size);
+    if(!risp_buff){
+        alarm(REQUEST_CONTROL_TIME);
+        // BUFFER OVERFLOW PROBLEM? RETURN IS ENOUGH?
+        return;
+    }
+    memcpy(risp_buff, (void*)&response, sizeof(uint8_t));
+    // insert sequence number - not present yet
+    memcpy(risp_buff+1, (void*)&loggedUserID, sizeof(int));
+    //if(response==CHAT_POS){
+        // send the public key
+       // memcpy(risp_buff+5, loggedUserID, sizeof(int));
+    //}
 
-    ret = send(sock_id, (void*)&response, sizeof(uint8_t), 0);
+    ret = send(sock_id, (void*)&risp_buff, risp_buff_size, 0);
+    free(risp_buff);
     alarm(REQUEST_CONTROL_TIME);
     return;
 }
@@ -542,6 +602,8 @@ int main(int argc, char* argv[])
     uint16_t sizeMsgServer;                 // size msg server on the net
     uint8_t commandCode = NOT_VALID_CMD;    // variable that will contain the opcode od the last commande issued by the user
     string counterpart;                     // username of the user involved in chat with me
+    /* pointer to the list of online users*/
+    user* user_list = NULL;
     // Data structure which represents a generic message
     struct genericMSG msgGenToSend;
     msgGenToSend.opcode = MSG;
@@ -798,6 +860,7 @@ int main(int argc, char* argv[])
                 default:
                 {
                     error = true;
+                    cout << " DBG - opcode: " << (uint16_t)op << endl;
                     errorHandler(SRV_INTERNAL_ERR);
                     goto close_all;
                 }

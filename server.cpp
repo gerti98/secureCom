@@ -393,7 +393,7 @@ int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& re
     unsigned char chat_cmd = CHAT_CMD;
     string client_username = get_username_by_user_id(client_user_id);
     int client_username_length = client_username.length();
-    int response_length = 5; //TODO: temporary
+    int response_length = 9+client_username_length; //TODO: temporary
 
     if (ret < 0)
         errorHandler(REC_ERR);
