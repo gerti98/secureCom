@@ -23,6 +23,7 @@
 #define MMAP_ERR            0x0F
 #define SRV_INTERNAL_ERR    0x10
 #define AUTHENTICATION_ERR  0x11
+#define MSG_ERR             0x12
 
 /*
  *  COMMAND CODE
@@ -54,7 +55,7 @@
  *  vvlog   |   3
 */
 
-#define VERBOSITY_LEVEL 3
+#define VERBOSITY_LEVEL 2
 
 
 /**************************

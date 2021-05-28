@@ -195,6 +195,17 @@ string get_username_by_user_id(size_t id){
     return username;
 }
 
+/**
+ *  @brief Removes traces of other execution due to the utilization of "named" data structures (semaphores and pipes) that can survive
+ */
+void prior_cleanup(){
+    sem_unlink(sem_user_store_name); //Remove traces of usage for older execution  
+    key_t key = ftok(message_queue_name, 65); 
+    vlog("Key of ftok returned is " + to_string(key));
+    int msgid = msgget(key, 0666 | IPC_CREAT);
+    vlog("msgid is " + to_string(msgid));
+    msgctl(msgid, IPC_RMID, NULL);
+}
 
 // ---------------------------------------------------------------------
 // FUNCTIONS of INTER-PROCESS COMMUNICATION
@@ -212,12 +223,12 @@ int relay_write(int to_user_id, msg_to_relay &msg){
 
     //Write to the message queue
     key_t key = ftok(message_queue_name, 65); 
-    vlog("Key of ftok returned is " + to_string(key));
+    vvlog("Key of ftok returned is " + to_string(key));
     int msgid = msgget(key, 0666 | IPC_CREAT);
-    vlog("msgid is " + to_string(msgid));
+    vvlog("msgid is " + to_string(msgid));
 
-    log("Relaying: ");
-    BIO_dump_fp(stdout, (const char*)msg.buffer, sizeof(msg_to_relay));
+    // log("Relaying: ");
+    // BIO_dump_fp(stdout, (const char*)msg.buffer, sizeof(msg_to_relay));
 
     msgsnd(msgid, &msg, sizeof(msg_to_relay), 0);
     return 0;
@@ -243,15 +254,16 @@ int relay_read(int user_id, msg_to_relay &msg, bool blocking){
     
     ret = msgrcv(msgid, &msg, sizeof(msg), user_id+1, (blocking? 0: IPC_NOWAIT));
     if(ret != -1){
-        log("ret: " + to_string(ret));   
-        log("Received from relay: ");
+        // log("ret: " + to_string(ret));   
+        log("Received from relay a msg: ");
         BIO_dump_fp(stdout, (const char*)msg.buffer, sizeof(msg_to_relay));
     } else {
         log("read nothing");
     }
 
-
-    alarm(RELAY_CONTROL_TIME);
+    if(blocking)
+        alarm(RELAY_CONTROL_TIME);
+    
     return ret;
 }
 
@@ -271,31 +283,48 @@ void signal_handler(int sig)
     // Se viene chiamato durante una comunicazione durante client e server rompe tutto perchè la listen legge un byte dal
     // socket
     log("Received signal for relay_reads");
-
     int ret;
-    uint8_t opcode = NOT_VALID_CMD;
-    uint8_t response;
-    int id_cp;
-    string counterpart;
-    char user_resp = 'a';
+    uint8_t opcode;
 
                 
     if(relay_read(client_user_id, relay_msg, false) != -1){
-        log("Found request to relay");
-        uchar opcode = *relay_msg.buffer;
+        opcode = *relay_msg.buffer;
+        log("Found request to relay with opcode: " + to_string(opcode));
+        
+        if(opcode == CHAT_CMD) {
+            int username_length;
+            memcpy(&username_length, (void*)(relay_msg.buffer + 5), sizeof(int));
+            log("USERNAME LENGTH: " + to_string(username_length));
 
-        int username_length;
-        memcpy(&username_length, (void*)(relay_msg.buffer + 5), sizeof(int));
-        log("USERNAME LENGTH: " + to_string(username_length));
-        int msg_length = 9 + username_length;
+            int msg_length = 9 + username_length;
 
-        // Send reply of the peer to the client
-        ret = send(comm_socket_id, relay_msg.buffer, msg_length, 0);
-        if(ret < msg_length)
-            errorHandler(SEND_ERR);
-
-        log("Sent to client : ");    
-        BIO_dump_fp(stdout, (const char*)relay_msg.buffer, ret);
+            // Send reply of the peer to the client
+            ret = send(comm_socket_id, relay_msg.buffer, msg_length, 0);
+            if(ret < msg_length)
+                errorHandler(SEND_ERR);
+            log("Sent to client : ");    
+            BIO_dump_fp(stdout, (const char*)relay_msg.buffer, ret);
+        } else if(opcode == CHAT_POS || opcode == CHAT_NEG){
+            int msg_length = 5;
+            ret = send(comm_socket_id, relay_msg.buffer, msg_length, 0);
+            if(ret < msg_length)
+                errorHandler(SEND_ERR);
+            log("Sent to client : ");    
+            BIO_dump_fp(stdout, (const char*)relay_msg.buffer, ret);
+        } else if(opcode == MSG){
+            int msg_length;
+            memcpy(&msg_length, (void*)(relay_msg.buffer + 5), sizeof(int));
+            log("MSG LENGTH: " + msg_length);
+            msg_length += 9;
+            // Send reply of the peer to the client
+            ret = send(comm_socket_id, relay_msg.buffer, msg_length, 0);
+            if(ret < msg_length)
+                errorHandler(SEND_ERR);
+            log("Sent to client : ");    
+            BIO_dump_fp(stdout, (const char*)relay_msg.buffer, ret);
+        } else {
+            log("OPCODE not recognized (" + to_string(opcode) + ")");
+        }
     }
                 
 
@@ -405,18 +434,23 @@ int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& re
     unsigned char chat_cmd = CHAT_CMD;
     string client_username = get_username_by_user_id(client_user_id);
     int client_username_length = client_username.length();
+    // uint32_t client_username_length_net = htonl(client_username_length);
+    // uint32_t client_user_id_net = htonl(client_user_id);
     int final_response_length = 5; //TODO: temporary
     const char* username = client_username.c_str();
     log(username);
 
     
     log("Request for chatting with user id " +  to_string(peer_user_id) + " arrived ");
+    // log("Username length is " + to_string(client_username_length) + " net: " + to_string(client_username_length_net));
+
     //TODO: add sequence number
     memcpy((void*)relay_msg.buffer, (void*)&chat_cmd, 1);
     memcpy((void*)(relay_msg.buffer + 1), (void*)&client_user_id, sizeof(int));
     memcpy((void*)(relay_msg.buffer + 5), (void*)&client_username_length, sizeof(int));
     memcpy((void*)(relay_msg.buffer + 9), (void*)username, client_username_length);
-    BIO_dump_fp(stdout, relay_msg.buffer, final_response_length);
+    log("Relaying: ");
+    BIO_dump_fp(stdout, relay_msg.buffer, (9 + client_username_length));
     //TODO: add pubkey
 
     
@@ -472,6 +506,7 @@ int handle_chat_pos(){
     //TODO: sequence number
     memcpy((void*)relay_msg.buffer, (void*)&chat_cmd, 1);
     memcpy((void*)(relay_msg.buffer + 1), (void*)&peer_user_id, sizeof(int));
+    log("Relaying: ");
     BIO_dump_fp(stdout, relay_msg.buffer, 5);
 
     //TODO: senderpubkey
@@ -509,17 +544,61 @@ int handle_chat_neg(){
 
     memcpy((void*)relay_msg.buffer, (void*)&chat_cmd, 1);
     memcpy((void*)(relay_msg.buffer + 1), (void*)&peer_user_id, sizeof(int));
+    log("Relaying: ");
     BIO_dump_fp(stdout, relay_msg.buffer, 5);
 
     relay_write(peer_user_id, relay_msg);
     return 0;
 }
 
-int handle_chat_response(){
-    log("Received CHAT_RESPONSE command");
-    log("\n\n... WORK IN PROGRESS ...\n\n");
+int handle_msg(){
+    log("Received CHAT command");
+    unsigned char cmd = MSG;
+    int peer_user_id, msg_length;
+    int peer_user_id_net, msg_length_net;
+    char* msg;
+    int ret = recv(comm_socket_id, (void *)&peer_user_id_net, sizeof(int), 0);
+    if (ret < 0)
+        errorHandler(REC_ERR);
+    if (ret == 0){
+        vlog("No message from the server");
+        exit(1);
+    }
+    ret = recv(comm_socket_id, (void *)&msg_length_net, sizeof(int), 0);
+    if (ret < 0)
+        errorHandler(REC_ERR);
+    if (ret == 0){
+        vlog("No message from the server");
+        exit(1);
+    }
+
+    peer_user_id = ntohl(peer_user_id_net);
+    msg_length = ntohl(msg_length_net);
+    msg = (char*)malloc(msg_length);
+    if(!msg)
+        errorHandler(MALLOC_ERR);
+    ret = recv(comm_socket_id, (void *)msg, msg_length, 0);
+    if (ret < 0)
+        errorHandler(REC_ERR);
+    if (ret == 0){
+        vlog("No message from the server");
+        exit(1);
+    }
+
+     //TODO: sequence number
+    log("MSG to send for " +  to_string(peer_user_id) + " arrived ");
+
+    memcpy((void*)relay_msg.buffer, (void*)&cmd, 1);
+    memcpy((void*)(relay_msg.buffer + 1), (void*)&peer_user_id_net, sizeof(int));
+    memcpy((void*)(relay_msg.buffer + 5), (void*)&msg_length_net, sizeof(int));
+    memcpy((void*)(relay_msg.buffer + 9), (void*)msg, msg_length);
+    log("Relaying: ");
+    BIO_dump_fp(stdout, relay_msg.buffer, 9 + msg_length);
+
+    relay_write(peer_user_id, relay_msg);
     return 0;
 }
+
 /**
  * @brief handle authentication with the client
  * @return user_id of the client or -1 if not present in the user store or in case of errors
@@ -558,17 +637,6 @@ int handle_client_authentication(){
     return get_user_id_by_username(client_username);
 }
 
-/**
- *  @brief Removes traces of other execution due to the utilization of "named" data structures (semaphores and pipes) that can survive
- */
-void prior_cleanup(){
-    sem_unlink(sem_user_store_name); //Remove traces of usage for older execution  
-    key_t key = ftok(message_queue_name, 65); 
-    vlog("Key of ftok returned is " + to_string(key));
-    int msgid = msgget(key, 0666 | IPC_CREAT);
-    vlog("msgid is " + to_string(msgid));
-    msgctl(msgid, IPC_RMID, NULL);
-}
 
 
 int main()
@@ -652,17 +720,17 @@ int main()
                 * Control if there is a need to relay by checking if our entry is okay
                 */
                 
-                if(relay_read(client_user_id, relay_msg, false) != -1){
-                    log("Found request to relay");
+                // if(relay_read(client_user_id, relay_msg, false) != -1){
+                //     log("Found request to relay");
                     
-                    // Send reply of the peer to the client
-                    ret = send(comm_socket_id, relay_msg.buffer, 5, 0);
-                    if(ret < 0 || ret!=5)
-                        errorHandler(SEND_ERR);
+                //     // Send reply of the peer to the client
+                //     ret = send(comm_socket_id, relay_msg.buffer, 5, 0);
+                //     if(ret < 0 || ret!=5)
+                //         errorHandler(SEND_ERR);
 
-                    log("Sent to client : ");    
-                    BIO_dump_fp(stdout, (const char*)relay_msg.buffer, ret);
-                }
+                //     log("Sent to client : ");    
+                //     BIO_dump_fp(stdout, (const char*)relay_msg.buffer, ret);
+                // }
                 
 
                 //Get Opcode from the client
@@ -698,12 +766,11 @@ int main()
                         if(ret<0)
                             errorHandler(GEN_ERR);
                         break;
-                    case CHAT_RESPONSE:
-                        ret = handle_chat_response();
-                        if(ret<0)
-                            errorHandler(GEN_ERR);
+                    case MSG:
+                        ret = handle_msg();
+                        if(ret < 0)
+                            errorHandler(MSG_ERR);
                         break;
-                        
                     default:
                         cout << "Command Not Valid" << endl;
                         break;
