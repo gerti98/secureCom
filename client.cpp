@@ -29,8 +29,13 @@ bool isChatting = false;
 /* This global variable is setted to true when an error occurs*/
 bool error = false;
 
-/* ID of the "logged" user*/
-int loggedUserID;
+/* ID and username of the "logged" user*/
+string loggedUser;
+int loggedUser_id;
+
+/* ID and username of the user that I am chatting with */
+string peer_username;
+int peer_id;
 
  /* socket id*/
 int sock_id;                           
@@ -109,17 +114,49 @@ uint8_t commandStringHandler(string cmd)
 }
 
 /**
+ * @brief Get the Username From the user id
+ * 
+ * @param userId 
+ * @param userlist 
+ * @return string that is the username, NULL if error
+ */
+string getUsernameFromID(int userId, user* userlist)
+{ 
+    if(userlist==NULL) {
+        cout << " Warning: userlist is null " << endl;
+        return NULL;
+    }
+    struct user* tmp = userlist;
+    while(tmp!=NULL) {
+        if(tmp->userId==userId) {
+            //strncpy((char*)username, (char*)tmp->username, tmp->usernameSize);  
+            string username ((char*)(tmp->username)); 
+            return username;
+        }
+        tmp = tmp->next;
+    }
+    return NULL;
+}
+
+
+/**
  * @brief Handle the client side part of the command chat
  * 
  * @param toSend 
- * @return int -1 if error, 0 otherwise
+ * @return int -1 requested user is not in the userlistor userlist is empty, 0 otherwise
  */
-int chat(struct commandMSG* toSend)
+int chat(struct commandMSG* toSend, user* userlist)
 {
+    if(userlist==NULL)
+        return -1;
     toSend->opcode = CHAT_CMD; 
     cout << " Write the userID of the user that you want to contact" << endl;
     printf(" > ");
     cin >> toSend->userId;
+    peer_id = toSend->userId;
+    peer_username = getUsernameFromID(peer_id, userlist);
+    if(peer_username.empty())
+        return -1;
     return 0;
 }
 
@@ -252,31 +289,6 @@ int print_list_users(user* userlist)
     return 0;
 }
 
-/**
- * @brief Get the Username From the user id
- * 
- * @param userId 
- * @param userlist 
- * @return string that is the username, NULL if error
- */
-string getUsernameFromID(int userId, user* userlist)
-{ 
-    if(userlist==NULL) {
-        cout << " Warning: userlist is null " << endl;
-        return NULL;
-    }
-    struct user* tmp = userlist;
-    while(tmp!=NULL) {
-        if(tmp->userId==userId) {
-            //strncpy((char*)username, (char*)tmp->username, tmp->usernameSize);  
-            string username ((char*)(tmp->username)); 
-            return username;
-        }
-        tmp = tmp->next;
-    }
-    return NULL;
-}
-
 
 /**
  * @brief It is in charge of handlig the sending of a command to the server
@@ -366,7 +378,7 @@ int receive_message(int sock_id, string msg)
 int authentication(int sock_id)
 {
     bool tooBig = false;    // indicates if the username inserted by the user is too big
-    string loggedUser;      // string which contains the user's username
+    //string loggedUser;      // string which contains the user's username
     int nonce;              // nonce R
     int server_nonce;       // nonce R2 from the server
     uint16_t usernameSize;
@@ -482,7 +494,7 @@ void signal_handler(int sig)
     uint8_t response;
     int id_cp;
     unsigned char* counterpart;
-    size_t size_username;
+    int size_username;
     char user_resp = 'a';
     unsigned char* risp_buff = NULL;
     size_t risp_buff_size = 0;
@@ -511,17 +523,17 @@ void signal_handler(int sig)
         return;
     }
     id_cp = ntohl(id_cp);
-    cout << " 2 " << endl;
+    
     // Read username length
-    ret = recv(sock_id, (void*)&size_username, sizeof(size_t), 0); 
+    ret = recv(sock_id, (void*)&size_username, sizeof(int), 0); 
     if(ret <= 0 || size_username==0){
         cout << " DBG - username length not received " << endl;
         alarm(REQUEST_CONTROL_TIME);
         return;
     }
-    cout << " 3 " << endl;
-    size_username = ntohl(size_username);
-
+    cout << " size: " << size_username << endl;
+    int real_size_username = ntohl(size_username);
+    cout << " size after ntohl " << real_size_username << endl;
     // Read username peer
     counterpart = (unsigned char*)malloc(size_username);
     if(!counterpart){
@@ -530,14 +542,14 @@ void signal_handler(int sig)
         // BUFFER OVERFLOW PROBLEM? RETURN IS ENOUGH?
         return;
     }
-    cout << " 4 " << endl;
+
     ret = recv(sock_id, (void*)counterpart, size_username, 0); 
     if(ret <= 0){
         cout << " DBG - username not received " << endl;
         alarm(REQUEST_CONTROL_TIME);
         return;
     }
-cout << " 5 " << endl;
+    cout << " cp: " << counterpart << endl;
     // Read sender pubkey - not present yet
 
 
@@ -561,7 +573,10 @@ cout << " 5 " << endl;
         return;
     }
 
-    cout << "\n Do you want to chat with " << counterpart << " with user id " << id_cp << " ? (y/n)" << endl;
+    peer_id = id_cp;
+    peer_username = (char*)counterpart;
+
+    cout << "\n Do you want to chat with " << peer_username << " aka " << counterpart << " with user id " << peer_id << " ? (y/n)" << endl;
     free(counterpart);
     while(user_resp!='y' && user_resp!='n') {
         cin >> user_resp;
@@ -572,7 +587,7 @@ cout << " 5 " << endl;
         else    
             cout << " Wrong format - Please write y if you want to accept, n otherwise " << endl;
     }
- 
+
     //risp_buff_size = sizeof(uint8_t)+sizeof(int) + (response==CHAT_POS)?PUBKEY_DEFAULT:0;
     risp_buff_size = sizeof(uint8_t)+sizeof(int); //TEMPORARY
     risp_buff = (unsigned char*)malloc(risp_buff_size);
@@ -583,7 +598,7 @@ cout << " 5 " << endl;
     }
     memcpy((void*)risp_buff, (void*)&response, sizeof(uint8_t));
     // insert sequence number - not present yet
-    memcpy((void*)(risp_buff+1), (void*)&loggedUserID, sizeof(int));
+    memcpy((void*)(risp_buff+1), (void*)&loggedUser_id, sizeof(int));
     //if(response==CHAT_POS){
         // send the public key
        // memcpy(risp_buff+5, loggedUserID, sizeof(int));
@@ -602,7 +617,7 @@ int main(int argc, char* argv[])
     int ret;                                // var to store function return value
     uint16_t sizeMsgServer;                 // size msg server on the net
     uint8_t commandCode = NOT_VALID_CMD;    // variable that will contain the opcode od the last commande issued by the user
-    string counterpart;                     // username of the user involved in chat with me
+    bool no_comm_with_srv = false;          // true if no communications with server are needed for a specific command
     /* pointer to the list of online users*/
     user* user_list = NULL;
     // Data structure which represents a generic message
@@ -680,11 +695,10 @@ int main(int argc, char* argv[])
             switch (commandCode)
             {
                 case CHAT_CMD:
-                    ret = chat(&cmdToSend);
+                    ret = chat(&cmdToSend,user_list);
                     if(ret<0) {
-                        error = true;
-                        errorHandler(GEN_ERR);
-                        goto close_all;
+                        cout << " The user indicated is not in your user list - try to launch !users_online then try again " << endl;
+                        no_comm_with_srv = true;
                     }
                 break;
 
@@ -693,6 +707,7 @@ int main(int argc, char* argv[])
                 break;
             
                 case HELP_CMD:
+                    no_comm_with_srv = true;
                     help();
                 break;
 
@@ -706,6 +721,7 @@ int main(int argc, char* argv[])
                 break;
             
                 case NOT_VALID_CMD:
+                    no_comm_with_srv = true;
                     cout << "Command Not Valid" << endl;
                     /***************/
                     // TEST FOR DEBUG
@@ -717,6 +733,7 @@ int main(int argc, char* argv[])
                 break;
             
                 default:
+                    no_comm_with_srv = true;
                     cout << "Command Not Valid" << endl;
                 break;
             }  
@@ -741,7 +758,7 @@ int main(int argc, char* argv[])
         /* ********************************
          *  COMMUNICATIONS WITH SERVER 
          * ********************************/
-        if(commandCode!=HELP_CMD) { // I have to send nothing to the server if the command is help
+        if(!no_comm_with_srv) {
              /* ****************************************
              *          SEND TO THE SERVER SECTION
              * *****************************************/
@@ -819,14 +836,14 @@ int main(int argc, char* argv[])
                         goto close_all;
                     }
 
-                    counterpart = getUsernameFromID(counterpart_id, user_list);
-                    if(counterpart.empty()){
+                    if(peer_username.empty()){
+                        cout << " DBG - Peer username is empty " << endl;
                         error = true;
                         errorHandler(GEN_ERR);
                         goto close_all;
                     }
                     
-                    if(cmdToSend.userId!=counterpart_id) {
+                    if(peer_id!=counterpart_id) {
                         cout << " Server internal error: the user id requested and the one available does not match" << endl;
                         break;
                     }
@@ -835,7 +852,7 @@ int main(int argc, char* argv[])
 
                     cout << " ******************************** " << endl;
                     cout << "               CHAT               " << endl;
-                    cout << " Send a message to " <<  counterpart << endl;
+                    cout << " Send a message to " <<  peer_username << endl;
                 }  
                 break;
 
@@ -853,12 +870,12 @@ int main(int argc, char* argv[])
                         goto close_all;
                     }
 
-                    if(counterpart.empty()){
+                    if(peer_username.empty()){
                         error = true;
                         errorHandler(GEN_ERR);
                         goto close_all;
                     }
-                    cout << " " << counterpart << " -> " << message << endl;
+                    cout << " " << peer_username << " -> " << message << endl;
                 }
                 break;
 
@@ -872,6 +889,7 @@ int main(int argc, char* argv[])
                 break;
             }
         }
+        no_comm_with_srv = false; // restore variable for the next command
         if(commandCode==EXIT_CMD)
             break;
     }
