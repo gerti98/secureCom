@@ -635,8 +635,18 @@ int handle_client_authentication(){
     log("Received username: " + client_username);
     
     set_user_socket(client_username, comm_socket_id); //to test the client
+    int client_user_id = get_user_id_by_username(client_username);
+    int client_user_id_net = htonl(client_user_id);
+    ret = send(comm_socket_id, (void*)&client_user_id, sizeof(int),0);
+    if(ret < sizeof(int)){
+        errorHandler(SEND_ERR);
+    }
+    log("Sent to client: ");
+    BIO_dump_fp(stdout, (const char*)&client_user_id, ret);
+
     
     //Check if present in the user_datastore
+    free(username);
     return get_user_id_by_username(client_username);
 }
 
