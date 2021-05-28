@@ -446,6 +446,9 @@ int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& re
 
     //TODO: add sequence number
     memcpy((void*)relay_msg.buffer, (void*)&chat_cmd, 1);
+
+    // PROPOSTA MODIFICA: stessa cosa commentata a riga 438
+    //client_user_id= htonl(client_user_id);
     memcpy((void*)(relay_msg.buffer + 1), (void*)&client_user_id, sizeof(int));
     memcpy((void*)(relay_msg.buffer + 5), (void*)&client_username_length, sizeof(int));
     memcpy((void*)(relay_msg.buffer + 9), (void*)username, client_username_length);

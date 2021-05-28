@@ -143,7 +143,7 @@ string getUsernameFromID(int userId, user* userlist)
  * @brief Handle the client side part of the command chat
  * 
  * @param toSend 
- * @return int -1 requested user is not in the userlistor userlist is empty, 0 otherwise
+ * @return int -1 requested user is not in the userlist or userlist is empty, 0 otherwise
  */
 int chat(struct commandMSG* toSend, user* userlist)
 {
@@ -588,21 +588,17 @@ void signal_handler(int sig)
             cout << " Wrong format - Please write y if you want to accept, n otherwise " << endl;
     }
 
-    //risp_buff_size = sizeof(uint8_t)+sizeof(int) + (response==CHAT_POS)?PUBKEY_DEFAULT:0;
-    risp_buff_size = sizeof(uint8_t)+sizeof(int); //TEMPORARY
+    risp_buff_size = sizeof(uint8_t)+sizeof(int); // sequence number not considere yet
     risp_buff = (unsigned char*)malloc(risp_buff_size);
     if(!risp_buff){
         alarm(REQUEST_CONTROL_TIME);
         // BUFFER OVERFLOW PROBLEM? RETURN IS ENOUGH?
         return;
     }
+    
     memcpy((void*)risp_buff, (void*)&response, sizeof(uint8_t));
     // insert sequence number - not present yet
-    memcpy((void*)(risp_buff+1), (void*)&loggedUser_id, sizeof(int));
-    //if(response==CHAT_POS){
-        // send the public key
-       // memcpy(risp_buff+5, loggedUserID, sizeof(int));
-    //}
+    memcpy((void*)(risp_buff+1), (void*)&peer_id, sizeof(int));
 
     ret = send(sock_id, (void*)risp_buff, risp_buff_size, 0);
     free(risp_buff);
