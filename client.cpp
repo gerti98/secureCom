@@ -653,16 +653,238 @@ void signal_handler(int sig)
     return;
 }
 
+
+/* pointer to the list of online users*/
+user* user_list = NULL;
+int commandHandler(string userInput){
+    int ret;
+    // Data structure which represents a command message
+    struct commandMSG cmdToSend;
+    cmdToSend.opcode = NOT_VALID_CMD;
+    cmdToSend.userId = -1;
+    // Data structure which represents a generic message
+    struct genericMSG msgGenToSend;
+    msgGenToSend.opcode = MSG;
+    msgGenToSend.payload = NULL;
+    msgGenToSend.length = 0;
+    bool no_comm_with_srv=false;
+    if(!isChatting || (isChatting==true && userInput.compare("!stop_chat")==0)) {
+        /* ****************************************
+            *          COMMAND SECTION
+        * *****************************************/
+        uint8_t commandCode = commandStringHandler(userInput);
+        switch (commandCode){
+        case CHAT_CMD:
+            ret = chat(&cmdToSend,user_list);
+            if(ret<0) {
+                cout << " The user indicated is not in your user list - try to launch !users_online then try again " << endl;
+                }
+            break;
+
+        case ONLINE_CMD:
+            cmdToSend.opcode = ONLINE_CMD;
+            break;
+            
+        case HELP_CMD:
+            help();
+            break;
+
+        case EXIT_CMD:
+            // The command is handled at the end of the while body
+            cmdToSend.opcode = EXIT_CMD;
+            break;
+            
+        case STOP_CHAT:
+            cmdToSend.opcode = STOP_CHAT;
+            break;
+            
+        case NOT_VALID_CMD:
+            no_comm_with_srv = true;
+            cout << "Command Not Valid" << endl;
+                    /***************/
+                    // TEST FOR DEBUG
+                   // cout << " DBG _ in attesa di un opcode " << endl;
+                   // uint8_t op;
+                    //ret = recv(sock_id, (void*)&op, sizeof(uint8_t), 0); 
+                    //cout << " opcode received " << (uint16_t)op << endl;
+                    //goto close_all;
+            break;
+            
+            default:
+                no_comm_with_srv = true;
+                cout << "Command Not Valid" << endl;
+            break;
+        }  
+
+        cout << " DBG - opcode of the command: " << (uint16_t)commandCode << endl;          
+    }else {
+        /* ****************************************
+        *          CHAT SECTION
+        * *****************************************/
+        msgGenToSend.opcode = MSG;
+        msgGenToSend.length = userInput.size()+1; //+1 for the null terminator
+        msgGenToSend.payload = (unsigned char*)malloc(msgGenToSend.length);
+        if(!msgGenToSend.payload) {
+            error = true;
+            errorHandler(MALLOC_ERR);
+            /*goto close_all; TODO: creare funzione di pulizia chiamabile ovunque*/
+        }
+        strncpy((char*)msgGenToSend.payload, userInput.c_str(), msgGenToSend.length);  
+    }
+     
+    if(no_comm_with_srv)
+        return 1;
+    /* ********************************
+    *  COMMUNICATIONS WITH SERVER 
+    * ********************************/
+    if(isChatting && cmdToSend.opcode!=STOP_CHAT) {
+        cout << " DBG - Sending message <" << msgGenToSend.payload << "> of length <" << msgGenToSend.length << " >" << endl;
+        ret = send_message(sock_id, &msgGenToSend);
+        if(ret!=0){
+            commandMSG stopAll;
+            stopAll.opcode = STOP_CHAT;
+            // I sent to the server a message to close the coms, then I close the application
+            send_command_to_server(sock_id, &stopAll);
+            error = true;
+            errorHandler(SEND_ERR);
+            // goto close_all;
+        }
+        cout << " DBG -  Message sent " << endl;
+
+    }
+    else {
+        // Send the command message to the server
+        cout << " DBG - I have to sent a command message to the server ... " << endl;
+        ret = send_command_to_server(sock_id, &cmdToSend);
+        if(ret!=0){
+            error = true;
+            errorHandler(SEND_ERR);
+            //goto close_all;
+        }
+        cout << " DBG - Command to server sent" << endl;
+    }
+    return 2;
+}
+
+int arriveHandler(int sock_id){
+ /* ****************************************
+*      RECEIVE FROM THE SERVER SECTION
+ * *****************************************/
+    uint8_t op;
+    int counterpart_id;
+    int ret;
+    cout << " DBG - wait for server response" << endl;
+    // I read the first byte to understand which type of message the server is sending to me
+    ret = recv(sock_id, (void*)&op, sizeof(uint8_t), 0);  
+    if(ret <= 0){
+        error = true;
+        errorHandler(REC_ERR);
+        //goto close_all;
+    }
+    /* ****************************************************************
+    * Action to perform considering the things sent from the server
+    * ****************************************************************/
+    switch (op){
+    case ONLINE_CMD:{
+            cout << " DBG - Online users command handling" << endl;
+            ret = retrieveOnlineUsers(sock_id, user_list);
+            if(ret == 0){
+                cout << " ** No users are online ** " << endl;
+            }
+            else if (ret==-1){
+                error = true;
+                errorHandler(GEN_ERR);
+                //goto close_all;
+            }
+            else if(print_list_users(user_list)!=0){
+                error = true;
+                errorHandler(GEN_ERR);
+                //goto close_all;
+                }
+                    // free before the termination of the program or before a new retrieveOnlineUsers        
+                    // free_list_users(user_list);
+            break;
+        }
+    case CHAT_POS:
+        {
+            // The server says that the client that I want to contact is available
+            ret = recv(sock_id, (void*)&counterpart_id, sizeof(int), 0);  
+            if(ret < 0) {
+                error = true;
+                errorHandler(REC_ERR);
+                    //goto close_all;
+            }
+                if(peer_username.empty()){
+                cout << " DBG - Peer username is empty " << endl;
+                error = true;
+                errorHandler(GEN_ERR);
+                //goto close_all;
+            }
+                    
+            if(peer_id!=counterpart_id) {
+            cout << " Server internal error: the user id requested and the one available does not match" << endl;
+                break;
+            }
+
+            isChatting = true;
+
+            cout << " ******************************** " << endl;
+            cout << "               CHAT               " << endl;
+            cout << " All the commands are ignored in this section except for !stop_chat " << endl;
+            cout << " Send a message to " <<  peer_username << endl;
+        }  
+            break;
+
+    case CHAT_NEG:
+        cout << " The user has refused the request " << endl;
+        break;
+
+    case CHAT_RESPONSE:
+        {
+            string message;
+            ret = receive_message(sock_id, message);
+            if(ret!=0) {
+                error = true;
+                errorHandler(REC_ERR);
+                //goto close_all;
+            }
+
+            if(peer_username.empty()){
+                error = true;
+                errorHandler(GEN_ERR);
+                //goto close_all;
+            }
+            cout << " " << peer_username << " -> " << message << endl;
+            }
+            break;
+    default:
+                {
+                    error = true;
+                    cout << " DBG - opcode: " << (uint16_t)op << endl;
+                    errorHandler(SRV_INTERNAL_ERR);
+                    //goto close_all;
+                }
+                break;
+            }
+}
+
 int main(int argc, char* argv[])
 {     
+
+    string userInput;
+    fd_set fdlist;
+    FD_ZERO(&fdlist);
+    FD_SET(fileno(stdin), &fdlist);
+    FD_SET(sock_id, &fdlist);
+    int n_input;
+    uint8_t op;
     int len;                                // size message
     int size;                               // server response size
     int ret;                                // var to store function return value
     uint16_t sizeMsgServer;                 // size msg server on the net
     uint8_t commandCode = NOT_VALID_CMD;    // variable that will contain the opcode od the last commande issued by the user
-    bool no_comm_with_srv = false;          // true if no communications with server are needed for a specific command
-    /* pointer to the list of online users*/
-    user* user_list = NULL;
+    bool need_server_answer = false;          // true if no communications with server are needed for a specific command
+
     // Data structure which represents a generic message
     struct genericMSG msgGenToSend;
     msgGenToSend.opcode = MSG;
@@ -721,13 +943,45 @@ int main(int argc, char* argv[])
     // a chat request originated from another clientS 
     signal(SIGALRM, signal_handler);
     alarm(REQUEST_CONTROL_TIME);
-
+  
     while(true) {
-        // Read msg from the std input
-        string userInput;
         cout << endl;
         printf(" > ");
-        cin >> userInput;
+
+        switch(select( 2, &fdlist, NULL, NULL, NULL)){
+        case 0:
+            printf("SELECT RETURN 0\n");
+            break;
+        case -1:
+            perror("select");
+            break;
+        default:
+            if (FD_ISSET(fileno(stdin), &fdlist)&&!need_server_answer) {
+                cin >> userInput; // è arrivato un comando da terminale
+                ret=commandHandler( userInput);
+                if(!ret){
+                    error = true;
+                    errorHandler(REC_ERR);
+                    goto close_all;
+                }
+            if(ret==2)
+                need_server_answer=true;
+            } 
+
+            if (FD_ISSET(sock_id, &fdlist)) {
+               // è arrivatoqualcosa sul socket
+                ret=arriveHandler(sock_id);
+                if(!ret){
+                    error = true;
+                    errorHandler(REC_ERR);
+                    goto close_all;
+                }
+                if(ret==1)
+                    need_server_answer=true;
+            } 
+        } 
+    }       
+        
         /* An attacker knowing this can try to write CHAT_STARTED but due
          * to the fact that there is a control on isChatting (s)he is not able
          * to enter in the following if*/
@@ -739,221 +993,9 @@ int main(int argc, char* argv[])
             printf(" > ");
             cin >> userInput;
         }*/
-        cout << endl;
-        cout << userInput << endl;
-        if(!isChatting || (isChatting==true && userInput.compare("!stop_chat")==0)) {
-            /* ****************************************
-             *          COMMAND SECTION
-             * *****************************************/
-            commandCode = commandStringHandler(userInput);
-
-            switch (commandCode)
-            {
-                case CHAT_CMD:
-                    ret = chat(&cmdToSend,user_list);
-                    if(ret<0) {
-                        cout << " The user indicated is not in your user list - try to launch !users_online then try again " << endl;
-                        no_comm_with_srv = true;
-                    }
-                break;
-
-                case ONLINE_CMD:
-                    cmdToSend.opcode = ONLINE_CMD;
-                break;
-            
-                case HELP_CMD:
-                    no_comm_with_srv = true;
-                    help();
-                break;
-
-                case EXIT_CMD:
-                    // The command is handled at the end of the while body
-                    cmdToSend.opcode = EXIT_CMD;
-                break;
-            
-                case STOP_CHAT:
-                    cmdToSend.opcode = STOP_CHAT;
-                break;
-            
-                case NOT_VALID_CMD:
-                    no_comm_with_srv = true;
-                    cout << "Command Not Valid" << endl;
-                    /***************/
-                    // TEST FOR DEBUG
-                   // cout << " DBG _ in attesa di un opcode " << endl;
-                   // uint8_t op;
-                    //ret = recv(sock_id, (void*)&op, sizeof(uint8_t), 0); 
-                    //cout << " opcode received " << (uint16_t)op << endl;
-                    //goto close_all;
-                break;
-            
-                default:
-                    no_comm_with_srv = true;
-                    cout << "Command Not Valid" << endl;
-                break;
-            }  
-
-            cout << " DBG - opcode of the command: " << (uint16_t)commandCode << endl;          
-        }
-        else {
-             /* ****************************************
-             *          CHAT SECTION
-             * *****************************************/
-            commandCode = MSG;
-            msgGenToSend.opcode = MSG;
-            msgGenToSend.length = userInput.size()+1; //+1 for the null terminator
-            msgGenToSend.payload = (unsigned char*)malloc(msgGenToSend.length);
-            if(!msgGenToSend.payload) {
-                error = true;
-                errorHandler(MALLOC_ERR);
-                goto close_all;
-            }
-            strncpy((char*)msgGenToSend.payload, userInput.c_str(), msgGenToSend.length);  
-        }
-        /* ********************************
-         *  COMMUNICATIONS WITH SERVER 
-         * ********************************/
-        if(!no_comm_with_srv) {
-             /* ****************************************
-             *          SEND TO THE SERVER SECTION
-             * *****************************************/
-            if(isChatting && cmdToSend.opcode!=STOP_CHAT) {
-                cout << " DBG - Sending message <" << msgGenToSend.payload << "> of length <" << msgGenToSend.length << " >" << endl;
-                ret = send_message(sock_id, &msgGenToSend);
-                if(ret!=0){
-                    commandMSG stopAll;
-                    stopAll.opcode = STOP_CHAT;
-                    // I sent to the server a message to close the coms, then I close the application
-                    send_command_to_server(sock_id, &stopAll);
-                    error = true;
-                    errorHandler(SEND_ERR);
-                    goto close_all;
-                }
-                cout << " DBG -  Message sent " << endl;
-            }
-            else {
-                // Send the command message to the server
-                cout << " DBG - I have to sent a command message to the server ... " << endl;
-                ret = send_command_to_server(sock_id, &cmdToSend);
-                if(ret!=0){
-                    error = true;
-                    errorHandler(SEND_ERR);
-                    goto close_all;
-                }
-                cout << " DBG - Command to server sent" << endl;
-            }
-            /* ****************************************
-             *      RECEIVE FROM THE SERVER SECTION
-             * *****************************************/
-            cout << " DBG - wait for server response" << endl;
-            // I read the first byte to understand which type of message the server is sending to me
-            uint8_t op;
-            ret = recv(sock_id, (void*)&op, sizeof(uint8_t), 0);  
-            if(ret <= 0){
-                error = true;
-                errorHandler(REC_ERR);
-                goto close_all;
-            }
-            /* ****************************************************************
-             * Action to perform considering the things sent from the server
-             * ****************************************************************/
-            switch (op)
-            {
-                case ONLINE_CMD:
-                {
-                    cout << " DBG - Online users command handling" << endl;
-                    ret = retrieveOnlineUsers(sock_id, user_list);
-                    if(ret == 0){
-                        cout << " ** No users are online ** " << endl;
-                    }
-                    else if (ret==-1){
-                        error = true;
-                        errorHandler(GEN_ERR);
-                        goto close_all;
-                    }
-                    else{ // correct output
-                        if(print_list_users(user_list)!=0){
-                            error = true;
-                            errorHandler(GEN_ERR);
-                            goto close_all;
-                        }
-                    }
-                    // free before the termination of the program or before a new retrieveOnlineUsers        
-                    // free_list_users(user_list);
-                }
-                break;
-
-                case CHAT_POS:
-                {
-                    // The server says that the client that I want to contact is available
-                    int counterpart_id;
-                   
-                    ret = recv(sock_id, (void*)&counterpart_id, sizeof(int), 0);  
-                    if(ret < 0) {
-                        error = true;
-                        errorHandler(REC_ERR);
-                        goto close_all;
-                    }
-
-                    if(peer_username.empty()){
-                        cout << " DBG - Peer username is empty " << endl;
-                        error = true;
-                        errorHandler(GEN_ERR);
-                        goto close_all;
-                    }
-                    
-                    if(peer_id!=counterpart_id) {
-                        cout << " Server internal error: the user id requested and the one available does not match" << endl;
-                        break;
-                    }
-
-                    isChatting = true;
-
-                    cout << " ******************************** " << endl;
-                    cout << "               CHAT               " << endl;
-                    cout << " All the commands are ignored in this section except for !stop_chat " << endl;
-                    cout << " Send a message to " <<  peer_username << endl;
-                }  
-                break;
-
-                case CHAT_NEG:
-                    cout << " The user has refused the request " << endl;
-                break;
-
-                case CHAT_RESPONSE:
-                {
-                    string message;
-                    ret = receive_message(sock_id, message);
-                    if(ret!=0) {
-                        error = true;
-                        errorHandler(REC_ERR);
-                        goto close_all;
-                    }
-
-                    if(peer_username.empty()){
-                        error = true;
-                        errorHandler(GEN_ERR);
-                        goto close_all;
-                    }
-                    cout << " " << peer_username << " -> " << message << endl;
-                }
-                break;
-
-                default:
-                {
-                    error = true;
-                    cout << " DBG - opcode: " << (uint16_t)op << endl;
-                    errorHandler(SRV_INTERNAL_ERR);
-                    goto close_all;
-                }
-                break;
-            }
-        }
-        no_comm_with_srv = false; // restore variable for the next command
-        if(commandCode==EXIT_CMD)
-            break;
-    }
-
+    cout << endl;
+    cout << userInput << endl;
+       
 close_all:
     if(msgGenToSend.payload)
         free(msgGenToSend.payload);
