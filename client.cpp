@@ -11,6 +11,10 @@
 #include <vector>
 #include <climits>
 #include <unistd.h>
+#include <openssl/evp.h>
+#include <openssl/pem.h>
+#include <openssl/rand.h>
+#include <sstream>
 #include "constant.h"
 #include "util.h"
 
@@ -322,20 +326,27 @@ int send_command_to_server(int sock_id, commandMSG* cmdToSend)
  */
 int send_message(int sock_id, genericMSG* msgToSend)
 {
-    int ret = send(sock_id,(void*)&msgToSend->opcode, sizeof(uint8_t), 0);
-    if(ret < 0 || ret!=sizeof(uint8_t))
-        return -1;
-                
-    uint16_t size = htons(msgToSend->length);
-    ret = send(sock_id,(void*)&size, sizeof(uint16_t), 0);
-    if(ret < 0 || ret!=sizeof(uint16_t))
+    unsigned char* msg = (unsigned char*)malloc(msgToSend->length+sizeof(uint8_t)+sizeof(uint16_t));
+    if(!msg)
         return -1;
 
-    ret = send(sock_id,(void*)msgToSend->payload, msgToSend->length, 0);
-    if(ret < 0 || ret!=msgToSend->length)
+    int bytes_allocated = 0;
+    uint16_t net_len = htons(msgToSend->length);
+    memcpy((void*)msg, &(msgToSend->opcode), sizeof(uint8_t));
+    bytes_allocated += sizeof(uint8_t);
+    memcpy((void*)(msg+bytes_allocated), &(net_len), sizeof(uint16_t));
+    bytes_allocated += sizeof(uint16_t);
+    memcpy((void*)(msg+bytes_allocated), (void*)(msgToSend->payload), (msgToSend->length));
+    bytes_allocated += msgToSend->length;
+
+    BIO_dump_fp(stdout, (const char*)msg, bytes_allocated);
+
+    int ret = send(sock_id, (void*)msg, bytes_allocated, 0);
+    if(ret < 0 || ret!=bytes_allocated)
         return -1;
 
     free(msgToSend->payload);
+    free(msg);
 
     return 0;
 }
@@ -472,9 +483,10 @@ int authentication(int sock_id)
         return -1;
     
     // At the end of the authentication the server will send the id that he is assigned to me
-    // ret = recv(sock_id, (void*)&loggedUserID, sizeof(int), 0);  
-    // if(ret <= 0)
-    //     return -1;
+    ret = recv(sock_id, (void*)&loggedUser_id, sizeof(int), 0);
+    cout << " I'm the user with ID " << loggedUser_id << endl;  
+    if(ret <= 0)
+        return -1;
 
     // For now let's assume that the authentication has been succesfully executed
     return 0;
@@ -489,7 +501,7 @@ int authentication(int sock_id)
 void signal_handler(int sig)
 {
     // Se viene chiamato durante una comunicazione durante client e server rompe tutto perchè la listen legge un byte dal socket
-    cout << " DBG - Received signal for controlling the chat request from the server" << endl;
+   // cout << " DBG - Received signal for controlling the chat request from the server" << endl;
     uint8_t opcode = NOT_VALID_CMD;
     uint8_t response;
     int id_cp;
@@ -501,12 +513,15 @@ void signal_handler(int sig)
 
     int ret = recv(sock_id, (void*)&opcode, sizeof(uint8_t), MSG_DONTWAIT); 
     if(ret <= 0){
-        cout << " DBG - nothing received " << endl;
+        //cout << " DBG - nothing received " << endl;
         alarm(REQUEST_CONTROL_TIME);
         return;
     }
 
     if(opcode!=CHAT_CMD){
+        if(opcode==MSG){
+            cout << " message arrived " << endl;
+        }
         cout << " DBG - wrong opcode: " << (uint16_t)opcode << endl;
         alarm(REQUEST_CONTROL_TIME);
         return;
@@ -575,8 +590,8 @@ void signal_handler(int sig)
 
     peer_id = id_cp;
     peer_username = (char*)counterpart;
-
-    cout << "\n Do you want to chat with " << peer_username << " aka " << counterpart << " with user id " << peer_id << " ? (y/n)" << endl;
+    cout << "\n **********************************************************" << endl;
+    cout << " Do you want to chat with " << peer_username << " with user id " << peer_id << " ? (y/n)" << endl;
     free(counterpart);
     while(user_resp!='y' && user_resp!='n') {
         cin >> user_resp;
@@ -602,6 +617,38 @@ void signal_handler(int sig)
 
     ret = send(sock_id, (void*)risp_buff, risp_buff_size, 0);
     free(risp_buff);
+
+    // I am now chatting with the user that request to contact me
+    // Clean stdin by what we have digit previously
+  //  cin.clear();
+    //fflush(stdin);
+
+    isChatting = true;
+    cout << " ******************************** " << endl;
+    //cout << " Press Enter to enter in the chat section" << endl;
+    cout << " ******************************** " << endl;
+    cout << "               CHAT               " << endl;
+    cout << " All the commands are ignored in this section except for !stop_chat " << endl;
+    cout << " Send a message to " <<  peer_username << " \n > " <<  endl;
+
+   // cin.putback('c');
+    //cin.clear();
+    //fflush(stdin);
+    
+        //    printf(" > ");
+    /*streambuf *backup;
+    string test = "CHAT_STARTED";
+    istringstream oss (test);
+    backup = cin.rdbuf();
+    cin.rdbuf(oss.rdbuf());
+    *///string str;
+    //cin >> str;
+    //cout << "read " << str;
+
+
+
+    //cin.putback
+    //printf(" > ");
     alarm(REQUEST_CONTROL_TIME);
     return;
 }
@@ -681,8 +728,20 @@ int main(int argc, char* argv[])
         cout << endl;
         printf(" > ");
         cin >> userInput;
+        /* An attacker knowing this can try to write CHAT_STARTED but due
+         * to the fact that there is a control on isChatting (s)he is not able
+         * to enter in the following if*/
+       /* if(userInput.compare("CHAT_STARTED")==0 && isChatting){
+            cout << " ******************************** " << endl;
+            cout << "               CHAT               " << endl;
+            cout << " All the commands are ignored in this section except for !stop_chat " << endl;
+            cout << " Send a message to " <<  peer_username << endl;
+            printf(" > ");
+            cin >> userInput;
+        }*/
         cout << endl;
-        if(!isChatting || (isChatting==true && userInput.compare("!stop_chat"))) {
+        cout << userInput << endl;
+        if(!isChatting || (isChatting==true && userInput.compare("!stop_chat")==0)) {
             /* ****************************************
              *          COMMAND SECTION
              * *****************************************/
@@ -742,14 +801,14 @@ int main(int argc, char* argv[])
              * *****************************************/
             commandCode = MSG;
             msgGenToSend.opcode = MSG;
-            msgGenToSend.length = userInput.size();
+            msgGenToSend.length = userInput.size()+1; //+1 for the null terminator
             msgGenToSend.payload = (unsigned char*)malloc(msgGenToSend.length);
             if(!msgGenToSend.payload) {
                 error = true;
                 errorHandler(MALLOC_ERR);
                 goto close_all;
             }
-            strncpy((char*)msgGenToSend.payload, userInput.c_str(), userInput.size());  
+            strncpy((char*)msgGenToSend.payload, userInput.c_str(), msgGenToSend.length);  
         }
         /* ********************************
          *  COMMUNICATIONS WITH SERVER 
@@ -759,9 +818,13 @@ int main(int argc, char* argv[])
              *          SEND TO THE SERVER SECTION
              * *****************************************/
             if(isChatting && cmdToSend.opcode!=STOP_CHAT) {
-                cout << " DBG - Sending message <" << msgGenToSend.payload << "> of length <" << msgGenToSend.length << endl;
+                cout << " DBG - Sending message <" << msgGenToSend.payload << "> of length <" << msgGenToSend.length << " >" << endl;
                 ret = send_message(sock_id, &msgGenToSend);
                 if(ret!=0){
+                    commandMSG stopAll;
+                    stopAll.opcode = STOP_CHAT;
+                    // I sent to the server a message to close the coms, then I close the application
+                    send_command_to_server(sock_id, &stopAll);
                     error = true;
                     errorHandler(SEND_ERR);
                     goto close_all;
@@ -848,6 +911,7 @@ int main(int argc, char* argv[])
 
                     cout << " ******************************** " << endl;
                     cout << "               CHAT               " << endl;
+                    cout << " All the commands are ignored in this section except for !stop_chat " << endl;
                     cout << " Send a message to " <<  peer_username << endl;
                 }  
                 break;
