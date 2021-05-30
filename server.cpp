@@ -637,7 +637,7 @@ int handle_client_authentication(){
     set_user_socket(client_username, comm_socket_id); //to test the client
     int client_user_id = get_user_id_by_username(client_username);
     int client_user_id_net = htonl(client_user_id);
-    ret = send(comm_socket_id, (void*)&client_user_id, sizeof(int),0);
+    ret = send(comm_socket_id, (void*)&client_user_id_net, sizeof(int),0);
     if(ret < sizeof(int)){
         errorHandler(SEND_ERR);
     }

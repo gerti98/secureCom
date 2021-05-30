@@ -41,7 +41,7 @@ int loggedUser_id;
 string peer_username;
 int peer_id;
 
- /* socket id*/
+/* socket id*/
 int sock_id;                           
 
 
@@ -66,6 +66,10 @@ struct user
     size_t usernameSize;
     user* next;
 };
+
+/* pointer to the list of online users*/
+user* user_list = NULL;
+
 
 /**
  * @brief Print the welcome message
@@ -128,7 +132,7 @@ string getUsernameFromID(int userId, user* userlist)
 { 
     if(userlist==NULL) {
         cout << " Warning: userlist is null " << endl;
-        return NULL;
+        return string();
     }
     struct user* tmp = userlist;
     while(tmp!=NULL) {
@@ -139,7 +143,7 @@ string getUsernameFromID(int userId, user* userlist)
         }
         tmp = tmp->next;
     }
-    return NULL;
+    return string();
 }
 
 
@@ -159,6 +163,7 @@ int chat(struct commandMSG* toSend, user* userlist)
     cin >> toSend->userId;
     peer_id = toSend->userId;
     peer_username = getUsernameFromID(peer_id, userlist);
+    cout << " dbg " << endl;
     if(peer_username.empty())
         return -1;
     return 0;
@@ -483,10 +488,13 @@ int authentication(int sock_id)
         return -1;
     
     // At the end of the authentication the server will send the id that he is assigned to me
-    ret = recv(sock_id, (void*)&loggedUser_id, sizeof(int), 0);
-    cout << " I'm the user with ID " << loggedUser_id << endl;  
+    int loggedUser_id_net;
+    ret = recv(sock_id, (void*)&loggedUser_id_net, sizeof(int), 0);
     if(ret <= 0)
         return -1;
+    loggedUser_id = ntohl(loggedUser_id_net);
+    cout << " I'm the user with ID " << loggedUser_id << endl;  
+    
 
     // For now let's assume that the authentication has been succesfully executed
     return 0;
@@ -653,9 +661,12 @@ void signal_handler(int sig)
     return;
 }
 
-
-/* pointer to the list of online users*/
-user* user_list = NULL;
+/**
+ * @brief Hanler of the command written by the user
+ * 
+ * @param userInput 
+ * @return return -1 in case of error, 1 if no answer from the server is needed, 2 if an answer from the server is needed
+ */
 int commandHandler(string userInput){
     int ret;
     // Data structure which represents a command message
@@ -670,15 +681,17 @@ int commandHandler(string userInput){
     bool no_comm_with_srv=false;
     if(!isChatting || (isChatting==true && userInput.compare("!stop_chat")==0)) {
         /* ****************************************
-            *          COMMAND SECTION
+        *          COMMAND SECTION
         * *****************************************/
         uint8_t commandCode = commandStringHandler(userInput);
+
         switch (commandCode){
         case CHAT_CMD:
             ret = chat(&cmdToSend,user_list);
             if(ret<0) {
                 cout << " The user indicated is not in your user list - try to launch !users_online then try again " << endl;
-                }
+                no_comm_with_srv = true;
+            }
             break;
 
         case ONLINE_CMD:
@@ -686,6 +699,7 @@ int commandHandler(string userInput){
             break;
             
         case HELP_CMD:
+            no_comm_with_srv = true;
             help();
             break;
 
@@ -727,6 +741,7 @@ int commandHandler(string userInput){
         if(!msgGenToSend.payload) {
             error = true;
             errorHandler(MALLOC_ERR);
+            return -1;
             /*goto close_all; TODO: creare funzione di pulizia chiamabile ovunque*/
         }
         strncpy((char*)msgGenToSend.payload, userInput.c_str(), msgGenToSend.length);  
@@ -747,10 +762,9 @@ int commandHandler(string userInput){
             send_command_to_server(sock_id, &stopAll);
             error = true;
             errorHandler(SEND_ERR);
-            // goto close_all;
+            return -1;
         }
         cout << " DBG -  Message sent " << endl;
-
     }
     else {
         // Send the command message to the server
@@ -759,13 +773,19 @@ int commandHandler(string userInput){
         if(ret!=0){
             error = true;
             errorHandler(SEND_ERR);
-            //goto close_all;
+            return -1;
         }
         cout << " DBG - Command to server sent" << endl;
     }
     return 2;
 }
 
+/**
+ * @brief Handler of the messages received from the server
+ * 
+ * @param sock_id 
+ * @return return -1 in case of error, 0 otherwise
+ */
 int arriveHandler(int sock_id){
  /* ****************************************
 *      RECEIVE FROM THE SERVER SECTION
@@ -779,7 +799,7 @@ int arriveHandler(int sock_id){
     if(ret <= 0){
         error = true;
         errorHandler(REC_ERR);
-        //goto close_all;
+        return -1;
     }
     /* ****************************************************************
     * Action to perform considering the things sent from the server
@@ -794,15 +814,13 @@ int arriveHandler(int sock_id){
             else if (ret==-1){
                 error = true;
                 errorHandler(GEN_ERR);
-                //goto close_all;
+                return -1;
             }
             else if(print_list_users(user_list)!=0){
                 error = true;
                 errorHandler(GEN_ERR);
-                //goto close_all;
-                }
-                    // free before the termination of the program or before a new retrieveOnlineUsers        
-                    // free_list_users(user_list);
+                return -1;
+            }
             break;
         }
     case CHAT_POS:
@@ -812,17 +830,17 @@ int arriveHandler(int sock_id){
             if(ret < 0) {
                 error = true;
                 errorHandler(REC_ERR);
-                    //goto close_all;
+                return -1;
             }
-                if(peer_username.empty()){
+            if(peer_username.empty()){
                 cout << " DBG - Peer username is empty " << endl;
                 error = true;
                 errorHandler(GEN_ERR);
-                //goto close_all;
+                return -1;
             }
                     
             if(peer_id!=counterpart_id) {
-            cout << " Server internal error: the user id requested and the one available does not match" << endl;
+                cout << " Server internal error: the user id requested and the one available does not match" << endl;
                 break;
             }
 
@@ -833,7 +851,7 @@ int arriveHandler(int sock_id){
             cout << " All the commands are ignored in this section except for !stop_chat " << endl;
             cout << " Send a message to " <<  peer_username << endl;
         }  
-            break;
+        break;
 
     case CHAT_NEG:
         cout << " The user has refused the request " << endl;
@@ -846,26 +864,27 @@ int arriveHandler(int sock_id){
             if(ret!=0) {
                 error = true;
                 errorHandler(REC_ERR);
-                //goto close_all;
+                return -1;
             }
 
             if(peer_username.empty()){
                 error = true;
                 errorHandler(GEN_ERR);
-                //goto close_all;
+                return -1;
             }
             cout << " " << peer_username << " -> " << message << endl;
-            }
-            break;
+        }
+        break;
     default:
-                {
-                    error = true;
-                    cout << " DBG - opcode: " << (uint16_t)op << endl;
-                    errorHandler(SRV_INTERNAL_ERR);
-                    //goto close_all;
-                }
-                break;
-            }
+        {
+            error = true;
+            cout << " DBG - opcode: " << (uint16_t)op << endl;
+            errorHandler(SRV_INTERNAL_ERR);
+            return -1;
+        }
+        break;
+    }
+    return 0;
 }
 
 int main(int argc, char* argv[])
@@ -873,9 +892,6 @@ int main(int argc, char* argv[])
 
     string userInput;
     fd_set fdlist;
-    FD_ZERO(&fdlist);
-    FD_SET(fileno(stdin), &fdlist);
-    FD_SET(sock_id, &fdlist);
     int n_input;
     uint8_t op;
     int len;                                // size message
@@ -883,7 +899,7 @@ int main(int argc, char* argv[])
     int ret;                                // var to store function return value
     uint16_t sizeMsgServer;                 // size msg server on the net
     uint8_t commandCode = NOT_VALID_CMD;    // variable that will contain the opcode od the last commande issued by the user
-    bool need_server_answer = false;          // true if no communications with server are needed for a specific command
+    bool need_server_answer = false;         // true if no communications with server are needed for a specific command
 
     // Data structure which represents a generic message
     struct genericMSG msgGenToSend;
@@ -937,18 +953,35 @@ int main(int argc, char* argv[])
         errorHandler(AUTHENTICATION_ERR);
         goto close_all;
     }
-    cout << " --- AUTHENTICATION DONE --- " << endl;
+    cout << " --- AUTHENTICATION DONE --- \n > " << endl;
 
     // Every REQUEST_CONTROL_TIME seconds a signal is issued to control if the server has sent
     // a chat request originated from another clientS 
-    signal(SIGALRM, signal_handler);
-    alarm(REQUEST_CONTROL_TIME);
-  
+    // signal(SIGALRM, signal_handler);
+    // alarm(REQUEST_CONTROL_TIME);
+    
+    printf(" ciao ");
     while(true) {
-        cout << endl;
-        printf(" > ");
+        // fdlist must be initialized after each use of the select
+        FD_ZERO(&fdlist);
+        FD_SET(fileno(stdin), &fdlist);
+        FD_SET(sock_id, &fdlist);
+        
+        // cout << " IN WHILE " << endl;
+        // cout << endl;
+    
+        // printf(" > ");
+        //cin >> userInput;
 
-        switch(select( 2, &fdlist, NULL, NULL, NULL)){
+        int howManyDescr = 0;
+        //cout << " stdin e sock: " << fileno(stdin) << " " << sock_id << endl;
+        int max_descr = (fileno(stdin)>=sock_id)?fileno(stdin):sock_id;
+        max_descr++;
+
+        //cout << " numero max descr" << max_descr << endl;
+        howManyDescr = select(max_descr, &fdlist, NULL, NULL, NULL);
+        
+        switch(howManyDescr){
         case 0:
             printf("SELECT RETURN 0\n");
             break;
@@ -956,28 +989,32 @@ int main(int argc, char* argv[])
             perror("select");
             break;
         default:
-            if (FD_ISSET(fileno(stdin), &fdlist)&&!need_server_answer) {
-                cin >> userInput; // è arrivato un comando da terminale
-                ret=commandHandler( userInput);
-                if(!ret){
+           // cout << " Descrittori pronti " << howManyDescr << endl;
+            need_server_answer = false;
+            if (FD_ISSET(fileno(stdin), &fdlist)!=0 && !need_server_answer) {
+                // The output must be read even if need_server_answer is false
+                cin >> userInput; // command from terminal arrived
+                
+                ret = commandHandler(userInput);
+                if(ret<0){
                     error = true;
                     errorHandler(REC_ERR);
                     goto close_all;
                 }
-            if(ret==2)
-                need_server_answer=true;
-            } 
-
-            if (FD_ISSET(sock_id, &fdlist)) {
-               // è arrivatoqualcosa sul socket
-                ret=arriveHandler(sock_id);
-                if(!ret){
-                    error = true;
-                    errorHandler(REC_ERR);
-                    goto close_all;
-                }
-                if(ret==1)
+                if(ret==2)
                     need_server_answer=true;
+                
+            }
+            if (FD_ISSET(sock_id, &fdlist)!=0) {
+                // Something arrived on the socket  
+                ret = arriveHandler(sock_id);
+                if(ret<0){
+                    error = true;
+                    errorHandler(REC_ERR);
+                    goto close_all;
+                }
+               // if(ret==1)
+                 //   need_server_answer=true;
             } 
         } 
     }       
@@ -993,8 +1030,8 @@ int main(int argc, char* argv[])
             printf(" > ");
             cin >> userInput;
         }*/
-    cout << endl;
-    cout << userInput << endl;
+    //cout << endl;
+    //cout << userInput << endl;
        
 close_all:
     if(msgGenToSend.payload)
