@@ -747,7 +747,7 @@ int main()
                 
 
                 //Get Opcode from the client
-                ret = recv(comm_socket_id, (void *)&msgOpcode, sizeof(char), 0);
+                ret = recv(comm_socket_id, (void *)&msgOpcode, sizeof(uint8_t), 0);
 
                 if (ret < 0)
                     errorHandler(REC_ERR);
