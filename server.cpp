@@ -22,6 +22,7 @@
 #include <fcntl.h>
 #include "constant.h"
 #include "util.h"
+#include "crypto.h"
 
 using namespace std;
 using uchar=unsigned char;
@@ -95,18 +96,23 @@ void sem_exit(sem_t* sem_id){
         errorHandler(SEM_CLOSE_ERR);
 }
 
+
+/**
+ * @brief test socket of communication in the user data store
+ * @return return 0 if username not found, 1 otherwise
+ */
 int set_user_socket(string username, int socket){
 
     sem_t* sem_id= sem_open(sem_user_store_name, O_CREAT, 0600, 1);
     sem_enter(sem_id);
     
     user_info* user_status = (user_info*)shmem;
-    int found = -1;
+    int found = 0;
     for(int i=0; i<REGISTERED_USERS; i++){
         if(user_status[i].username.compare(username) == 0){
             user_status[i].socket_id = socket;
             log("Set socket of " + username + " correctly");
-            found = 0;
+            found = 1;
             break;
         }
     }
@@ -607,7 +613,18 @@ int handle_msg(){
  * @return user_id of the client or -1 if not present in the user store or in case of errors
  */
 int handle_client_authentication(){
+    // RECEIVING M1
     int ret;
+    uint16_t R1;
+    // ret = recv(comm_socket_id, (void *)&R1, sizeof(NUANCE_DEFAULT), 0);
+    // if (ret < 0)
+    //     errorHandler(REC_ERR);
+    // if (ret == 0){
+    //     vlog("No message from the server");
+    //     exit(1);
+    // }
+    // R1 = ntohl(R1);
+
     uint16_t size;
     ret = recv(comm_socket_id, (void *)&size, sizeof(uint16_t), 0);
     if (ret < 0)
@@ -634,7 +651,133 @@ int handle_client_authentication(){
     string client_username(username);
     log("Received username: " + client_username);
     
-    set_user_socket(client_username, comm_socket_id); //to test the client
+    ret = set_user_socket(client_username, comm_socket_id); //to test the client
+    if(ret != 1){
+        cerr << "User not exist!" << endl;
+        free(username);
+        exit(1);
+    }
+
+
+    // PREPARING M2
+    uchar* R2 = (uchar*)malloc(NUANCE_DEFAULT);
+    if(!R2){
+        errorHandler(MALLOC_ERR);
+    }
+
+
+    //Generate pair of ephermeral DH keys
+    void* eph_privkey_s;
+    uchar* eph_pubkey_s;
+    uint pubkey_len = PUBKEY_DEFAULT;
+    ret = eph_key_generate(&eph_privkey_s, &eph_pubkey_s, &pubkey_len);
+    if(ret != 1){
+        log("Error on EPH_KEY_GENERATE");
+        exit(1);
+    }
+
+    //Generate nuance R2
+    ret = random_generate(NUANCE_DEFAULT, R2);
+    if(ret != 1){
+        log("Error on random_generate");
+        exit(1);
+    }
+    log("auth (2) R2: ");
+    BIO_dump_fp(stdout, (const char*)R2, NUANCE_DEFAULT);
+
+    //Get certificate of Server
+    FILE* cert_file = fopen("certification/SecureCom_cert.pem", "rb");
+    if(!cert_file){
+        log("Error on opening cert file");
+        exit(1);
+    }
+    
+    uchar* certificate_ser;
+    ret = serialize_certificate(cert_file, &certificate_ser);
+    if(ret == 0){
+        log("Error on serialize certificate");
+    }
+
+    uint M2_to_sign_length = NUANCE_DEFAULT*2 + PUBKEY_DEFAULT, M2_signed_length;
+    uchar* M2_to_sign = (uchar*)malloc(M2_to_sign_length);
+    uchar* M2_signed;
+    if(!M2_to_sign){
+        log("Error on M2_to_sign");
+        exit(1);
+    }
+
+    memcpy(M2_to_sign, &R1, sizeof(uint16_t));
+    memcpy((void*)(M2_to_sign + 2), &R2, sizeof(uint16_t));
+    memcpy((void*)(M2_to_sign + 4), eph_pubkey_s, PUBKEY_DEFAULT);
+
+    FILE* server_key = fopen("certification/SecureCom_key.pem", "rb");
+    if(!server_key){
+        log("Error on opening key file");
+        exit(1);
+    }
+
+    ret = sign_document(M2_to_sign, M2_to_sign_length, server_key,&M2_signed, &M2_signed_length);
+    if(ret != 1){
+        log("Error on signing part on M2");
+        exit(1);
+    }
+
+    //Send M2 part by part
+    // ret = send(comm_socket_id, eph_pubkey_s, PUBKEY_DEFAULT, 0);
+    // if(ret <= PUBKEY_DEFAULT){
+    //     errorHandler(SEND_ERR);
+    //     exit(1);
+    // }    
+    // ret = send(comm_socket_id, &R2, NUANCE_DEFAULT, 0);
+    // if(ret <= NUANCE_DEFAULT){
+    //     errorHandler(SEND_ERR);
+    //     exit(1);
+    // }
+    // ret = send(comm_socket_id, M2_signed, M2_signed_length, 0);
+    // if(ret <= M2_signed_length){
+    //     errorHandler(SEND_ERR);
+    //     exit(1);
+    // }
+    // ret = send(comm_socket_id, certificate_ser,);
+    // if(ret <= ){
+    //     errorHandler(SEND_ERR);
+    //     exit(1);
+    // }
+
+
+
+    //Receiving M3
+    // uchar* eph_pubkey_c = (uchar*)malloc(PUBKEY_DEFAULT);
+    // if(!eph_pubkey_c){
+    //     errorHandler(MALLOC_ERR);
+    //     exit(1);
+    // }
+
+    // ret = recv(comm_socket_id, eph_pubkey_c, PUBKEY_DEFAULT, 0);
+    // if(ret <= 0){
+    //     errorHandler(REC_ERR);
+    //     exit(1);
+    // }
+
+    // //TODO: need to know certificate length for M2 and M3
+    // uchar* M3_signed = (uchar*)malloc(...);
+    // if(!M3_signed){
+    //     errorHandler(MALLOC_ERR);
+    //     exit(1);
+    // }
+    // ret = recv(comm_socket_id, M3_signed, ..., 0);
+    // if(ret <= 0){
+    //     errorHandler(REC_ERR);
+    //     exit(1);
+    // }
+
+    // verify_sign_pubkey();
+    // derive_secret();
+
+
+
+    
+    //Send user id of the client 
     int client_user_id = get_user_id_by_username(client_username);
     int client_user_id_net = htonl(client_user_id);
     ret = send(comm_socket_id, (void*)&client_user_id_net, sizeof(int),0);
@@ -731,19 +874,7 @@ int main()
                 
                 /*
                 * Control if there is a need to relay by checking if our entry is okay
-                */
-                
-                // if(relay_read(client_user_id, relay_msg, false) != -1){
-                //     log("Found request to relay");
-                    
-                //     // Send reply of the peer to the client
-                //     ret = send(comm_socket_id, relay_msg.buffer, 5, 0);
-                //     if(ret < 0 || ret!=5)
-                //         errorHandler(SEND_ERR);
-
-                //     log("Sent to client : ");    
-                //     BIO_dump_fp(stdout, (const char*)relay_msg.buffer, ret);
-                // }
+                */    
                 
 
                 //Get Opcode from the client
@@ -757,36 +888,36 @@ int main()
                 }
                 //Demultiplexing of opcode
                 switch (msgOpcode){
-                    case CHAT_CMD:
-                        ret = handle_chat_request(comm_socket_id, client_user_id, relay_msg);
-                        if(ret<0)
-                            errorHandler(GEN_ERR);
-                        break;
+                case CHAT_CMD:
+                    ret = handle_chat_request(comm_socket_id, client_user_id, relay_msg);
+                    if(ret<0)
+                        errorHandler(GEN_ERR);
+                    break;
 
-                    case ONLINE_CMD:
-                        ret = handle_get_online_users(comm_socket_id);
-                        if(ret<0)
-                            errorHandler(GEN_ERR);
-                        break;
-                    
-                    case CHAT_POS:
-                        ret = handle_chat_pos();
-                        if(ret<0)
-                            errorHandler(GEN_ERR);
-                        break;
-                    case CHAT_NEG:
-                        ret = handle_chat_neg();
-                        if(ret<0)
-                            errorHandler(GEN_ERR);
-                        break;
-                    case MSG:
-                        ret = handle_msg();
-                        if(ret < 0)
-                            errorHandler(MSG_ERR);
-                        break;
-                    default:
-                        cout << "Command Not Valid" << endl;
-                        break;
+                case ONLINE_CMD:
+                    ret = handle_get_online_users(comm_socket_id);
+                    if(ret<0)
+                        errorHandler(GEN_ERR);
+                    break;
+                
+                case CHAT_POS:
+                    ret = handle_chat_pos();
+                    if(ret<0)
+                        errorHandler(GEN_ERR);
+                    break;
+                case CHAT_NEG:
+                    ret = handle_chat_neg();
+                    if(ret<0)
+                        errorHandler(GEN_ERR);
+                    break;
+                case MSG:
+                    ret = handle_msg();
+                    if(ret < 0)
+                        errorHandler(MSG_ERR);
+                    break;
+                default:
+                    cout << "Command Not Valid" << endl;
+                    break;
                 }
 
             }
