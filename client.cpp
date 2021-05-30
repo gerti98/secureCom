@@ -662,6 +662,127 @@ void signal_handler(int sig)
 }
 
 /**
+ * @brief handle an incoming chat request
+ * 
+ * @param sock_id communication socket
+ * @return 1 if everything's ok, 0 on error(s)
+ */
+int chatRequestHandler(int sock_id){
+    int ret;
+    uint8_t opcode = NOT_VALID_CMD;
+    uint8_t response;
+    int id_cp;
+    unsigned char* counterpart;
+    int size_username;
+    char user_resp = 'a';
+    unsigned char* risp_buff = NULL;
+    size_t risp_buff_size = 0;
+    cout << " DBG - Received a chat request " << endl;
+    // Reading of sequence number - not present yet
+
+    // Reading of the peer id
+    ret = recv(sock_id, (void*)&id_cp, sizeof(int), 0); 
+    if(ret <= 0){
+        cout << " DBG - peer id not received " << endl;
+        alarm(REQUEST_CONTROL_TIME);
+        return 0;
+    }
+    //id_cp = ntohl(id_cp);
+    
+    // Read username length
+    ret = recv(sock_id, (void*)&size_username, sizeof(int), 0); 
+    if(ret <= 0 || size_username==0){
+        cout << " DBG - username length not received " << endl;
+        alarm(REQUEST_CONTROL_TIME);
+        return 0;
+    }
+    cout << " size: " << size_username << endl;
+    //int real_size_username = ntohl(size_username);
+    //cout << " size after ntohl " << real_size_username << endl;
+    // Read username peer
+    counterpart = (unsigned char*)malloc(size_username);
+    if(!counterpart){
+        cout << " DBG - malloc error for counterpart " << endl;
+        alarm(REQUEST_CONTROL_TIME);
+        // BUFFER OVERFLOW PROBLEM? RETURN IS ENOUGH?
+        return 0;
+    }
+
+    ret = recv(sock_id, (void*)counterpart, size_username, 0); 
+    if(ret <= 0){
+        cout << " DBG - username not received " << endl;
+        alarm(REQUEST_CONTROL_TIME);
+        return 0;
+    }
+    cout << " cp: " << counterpart << endl;
+    // Read sender pubkey - not present yet
+
+    if(isChatting){
+        cout << " DBG - Automatic response because I am chatting " << endl;
+        // Automatic response
+        free(counterpart);
+        risp_buff_size = sizeof(uint8_t)+sizeof(int);
+        risp_buff = (unsigned char*)malloc(risp_buff_size);
+        if(!risp_buff){
+            alarm(REQUEST_CONTROL_TIME);
+            // BUFFER OVERFLOW PROBLEM? RETURN IS ENOUGH?
+            return 0;
+        }
+        response = CHAT_NEG;
+        memcpy(risp_buff, (void*)&response, sizeof(uint8_t));
+        memcpy(risp_buff+1, (void*)&id_cp, sizeof(int));
+        ret = send(sock_id, (void*)risp_buff, risp_buff_size, 0);
+        free(risp_buff);
+        alarm(REQUEST_CONTROL_TIME);
+        return 0;
+    }
+
+    peer_id = ntohl(id_cp);
+    peer_username = (char*)counterpart;
+    cout << "\n **********************************************************" << endl;
+    cout << " Do you want to chat with " << peer_username << " with user id " << peer_id << " ? (y/n)" << endl;
+    free(counterpart);
+    while(user_resp!='y' && user_resp!='n') {
+        cin >> user_resp;
+        if(user_resp=='y')
+            response = CHAT_POS;
+        else if (user_resp=='n')
+            response = CHAT_NEG;
+        else    
+            cout << " Wrong format - Please write y if you want to accept, n otherwise " << endl;
+    }
+
+    risp_buff_size = sizeof(uint8_t)+sizeof(int); // sequence number not considere yet
+    risp_buff = (unsigned char*)malloc(risp_buff_size);
+    if(!risp_buff){
+        alarm(REQUEST_CONTROL_TIME);
+        // BUFFER OVERFLOW PROBLEM? RETURN IS ENOUGH?
+        return 0;
+    }
+    
+    memcpy((void*)risp_buff, (void*)&response, sizeof(uint8_t));
+    // insert sequence number - not present yet
+    memcpy((void*)(risp_buff+1), (void*)&peer_id, sizeof(int));
+
+    ret = send(sock_id, (void*)risp_buff, risp_buff_size, 0);
+    free(risp_buff);
+
+    // I am now chatting with the user that request to contact me
+    // Clean stdin by what we have digit previously
+    cin.clear();
+    fflush(stdin);
+
+    isChatting = true;
+    cout << " ******************************** " << endl;
+    //cout << " Press Enter to enter in the chat section" << endl;
+    cout << " ******************************** " << endl;
+    cout << "               CHAT               " << endl;
+    cout << " All the commands are ignored in this section except for !stop_chat " << endl;
+    cout << " Send a message to " <<  peer_username << " \n > " <<  endl;
+    return 1;
+}
+
+/**
  * @brief Hanler of the command written by the user
  * 
  * @param userInput 
@@ -690,7 +811,7 @@ int commandHandler(string userInput){
             ret = chat(&cmdToSend,user_list);
             if(ret<0) {
                 cout << " The user indicated is not in your user list - try to launch !users_online then try again " << endl;
-                no_comm_with_srv = true;
+                no_comm_with_srv=true;
             }
             break;
 
@@ -724,9 +845,9 @@ int commandHandler(string userInput){
                     //goto close_all;
             break;
             
-            default:
-                no_comm_with_srv = true;
-                cout << "Command Not Valid" << endl;
+        default:
+            no_comm_with_srv = true;                
+            cout << "Command Not Valid" << endl;
             break;
         }  
 
@@ -745,6 +866,7 @@ int commandHandler(string userInput){
             /*goto close_all; TODO: creare funzione di pulizia chiamabile ovunque*/
         }
         strncpy((char*)msgGenToSend.payload, userInput.c_str(), msgGenToSend.length);  
+        
     }
      
     if(no_comm_with_srv)
@@ -765,6 +887,7 @@ int commandHandler(string userInput){
             return -1;
         }
         cout << " DBG -  Message sent " << endl;
+        return 1;
     }
     else {
         // Send the command message to the server
@@ -793,11 +916,12 @@ int arriveHandler(int sock_id){
     uint8_t op;
     int counterpart_id;
     int ret;
-    cout << " DBG - wait for server response" << endl;
+    cout << " DBG - recived something" << endl;
     // I read the first byte to understand which type of message the server is sending to me
     ret = recv(sock_id, (void*)&op, sizeof(uint8_t), 0);  
     if(ret <= 0){
         error = true;
+        perror("recv on arriving something return negative value");
         errorHandler(REC_ERR);
         return -1;
     }
@@ -806,85 +930,94 @@ int arriveHandler(int sock_id){
     * ****************************************************************/
     switch (op){
     case ONLINE_CMD:{
-            cout << " DBG - Online users command handling" << endl;
-            ret = retrieveOnlineUsers(sock_id, user_list);
-            if(ret == 0){
-                cout << " ** No users are online ** " << endl;
+        cout << " DBG - Online users command handling" << endl;
+        ret = retrieveOnlineUsers(sock_id, user_list);
+        if(ret == 0){
+            cout << " ** No users are online ** " << endl;
             }
-            else if (ret==-1){
-                error = true;
-                errorHandler(GEN_ERR);
-                return -1;
-            }
-            else if(print_list_users(user_list)!=0){
-                error = true;
-                errorHandler(GEN_ERR);
-                return -1;
-            }
+        else if (ret==-1){
+            error = true;
+            errorHandler(GEN_ERR);
+            
+            return -1;
+        }
+        else if(print_list_users(user_list)!=0){
+            error = true;
+            errorHandler(GEN_ERR);
+            return -1;
+        }
+        break;
+    }
+    case CHAT_POS:
+    {
+        // The server says that the client that I want to contact is available
+        ret = recv(sock_id, (void*)&counterpart_id, sizeof(int), 0);  
+        if(ret < 0) {
+            error = true;
+            errorHandler(REC_ERR);
+            return -1;
+        }
+        if(peer_username.empty()){
+            cout << " DBG - Peer username is empty " << endl;
+            error = true;
+            errorHandler(GEN_ERR);
+            return -1;
+        }
+                    
+        if(peer_id!=counterpart_id) {
+            cout << " Server internal error: the user id requested and the one available does not match" << endl;
             break;
         }
-    case CHAT_POS:
-        {
-            // The server says that the client that I want to contact is available
-            ret = recv(sock_id, (void*)&counterpart_id, sizeof(int), 0);  
-            if(ret < 0) {
-                error = true;
-                errorHandler(REC_ERR);
-                return -1;
-            }
-            if(peer_username.empty()){
-                cout << " DBG - Peer username is empty " << endl;
-                error = true;
-                errorHandler(GEN_ERR);
-                return -1;
-            }
-                    
-            if(peer_id!=counterpart_id) {
-                cout << " Server internal error: the user id requested and the one available does not match" << endl;
-                break;
-            }
 
-            isChatting = true;
+        isChatting = true;
 
-            cout << " ******************************** " << endl;
-            cout << "               CHAT               " << endl;
-            cout << " All the commands are ignored in this section except for !stop_chat " << endl;
-            cout << " Send a message to " <<  peer_username << endl;
-        }  
-        break;
-
+        cout << " ******************************** " << endl;
+        cout << "               CHAT               " << endl;
+        cout << " All the commands are ignored in this section except for !stop_chat " << endl;
+        cout << " Send a message to " <<  peer_username << endl;
+    }  
+    break;
     case CHAT_NEG:
         cout << " The user has refused the request " << endl;
         break;
 
     case CHAT_RESPONSE:
-        {
-            string message;
-            ret = receive_message(sock_id, message);
-            if(ret!=0) {
-                error = true;
-                errorHandler(REC_ERR);
-                return -1;
-            }
-
-            if(peer_username.empty()){
-                error = true;
-                errorHandler(GEN_ERR);
-                return -1;
-            }
-            cout << " " << peer_username << " -> " << message << endl;
-        }
-        break;
-    default:
-        {
+    {
+        string message;
+        ret = receive_message(sock_id, message);
+        if(ret!=0) {
             error = true;
-            cout << " DBG - opcode: " << (uint16_t)op << endl;
-            errorHandler(SRV_INTERNAL_ERR);
+            perror("chat response");
+            errorHandler(REC_ERR);
             return -1;
         }
-        break;
+
+        if(peer_username.empty()){
+            error = true;
+            errorHandler(GEN_ERR);
+            return -1;
+        }
+        cout << " " << peer_username << " -> " << message << endl;
     }
-    return 0;
+    break;
+    case CHAT_CMD:
+        ret = chatRequestHandler(sock_id);
+        if(ret<=0) {
+            error = true;
+            perror("chat command");
+            errorHandler(REC_ERR);
+            return -1;
+        }
+    break;
+    default:{
+        error = true;
+        cout << " DBG - opcode: " << (uint16_t)op << endl;
+        errorHandler(SRV_INTERNAL_ERR);
+        return -1;
+    }
+    break;
+    }
+    return 1;
 }
 
 int main(int argc, char* argv[])
@@ -970,7 +1103,7 @@ int main(int argc, char* argv[])
         // cout << " IN WHILE " << endl;
         // cout << endl;
     
-        // printf(" > ");
+        printf(" > ");
         //cin >> userInput;
 
         int howManyDescr = 0;
@@ -990,16 +1123,18 @@ int main(int argc, char* argv[])
             break;
         default:
            // cout << " Descrittori pronti " << howManyDescr << endl;
-            need_server_answer = false;
-            if (FD_ISSET(fileno(stdin), &fdlist)!=0 && !need_server_answer) {
+            //need_server_answer = false;
+
+            if (FD_ISSET(fileno(stdin), &fdlist)!=0) {
                 // The output must be read even if need_server_answer is false
                 cin >> userInput; // command from terminal arrived
-                
-                ret = commandHandler(userInput);
-                if(ret<0){
-                    error = true;
-                    errorHandler(REC_ERR);
-                    goto close_all;
+                if(!need_server_answer)
+                    ret = commandHandler(userInput);
+                    if(ret<0){
+                        error = true;
+                        perror("cin");
+                        errorHandler(GEN_ERR);
+                        goto close_all;
                 }
                 if(ret==2)
                     need_server_answer=true;
@@ -1010,11 +1145,12 @@ int main(int argc, char* argv[])
                 ret = arriveHandler(sock_id);
                 if(ret<0){
                     error = true;
-                    errorHandler(REC_ERR);
+                    perror("recv");
+                    errorHandler(GEN_ERR);
                     goto close_all;
                 }
-               // if(ret==1)
-                 //   need_server_answer=true;
+                if(ret!=2)
+                   need_server_answer=false;
             } 
         } 
     }       
