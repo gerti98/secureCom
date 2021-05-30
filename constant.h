@@ -33,7 +33,7 @@
 #define ONLINE_CMD      0x03
 #define CHAT_CMD        0x04
 #define HELP_CMD        0x05
-#define MSG             0x06
+//#define MSG             0x06
 #define CHAT_POS        0x07
 #define CHAT_NEG        0x08
 #define STOP_CHAT       0x09
@@ -55,7 +55,7 @@
  *  vvlog   |   3
 */
 
-#define VERBOSITY_LEVEL 2
+#define VERBOSITY_LEVEL 1
 
 
 /**************************
@@ -66,7 +66,7 @@
 #define REGISTERED_USERS 5
 #define BUFFER_MAX  102400
 #define REQUEST_CONTROL_TIME 30 // seconds
-#define RELAY_CONTROL_TIME 15 //seconds
+#define RELAY_CONTROL_TIME 3 //seconds
 #define RELAY_MSG_SIZE 100
 
 /**************************
