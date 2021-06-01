@@ -449,7 +449,7 @@ int authentication(int sock_id)
      * M1 - Send R,username to the server
      *************************************************************/
     // Nonce Generation
-    cout << " DBG - Nonce generation " << endl;
+cout << " DBG - Nonce generation " << endl;
     nonce = (unsigned char*)malloc(NONCE_SIZE);
     if(!nonce)
         return -1;
@@ -458,6 +458,7 @@ int authentication(int sock_id)
     BIO_dump_fp(stdout, (const char*)nonce, NONCE_SIZE);
 
     // Preparation of the username
+cout << " DBG - Preparation of the usename " << endl;
     usernameSize = loggedUser.size()+1; // +1 for string terminator
     name = (unsigned char*)malloc(usernameSize);
     if(!name){
@@ -469,6 +470,7 @@ int authentication(int sock_id)
     name[usernameSize-1] = '\0'; // to avoid error in strncpy
 
     // Composition of the message: OPCODE, R, USERNAME_SIZE, USERNAME
+cout << " DBG - Composition of the message " << endl;
     size_to_allocate = NONCE_SIZE+sizeof(uint16_t)+usernameSize;
     msg_auth_1 = (unsigned char*)malloc(size_to_allocate);
     if(!msg_auth_1){
@@ -483,9 +485,11 @@ int authentication(int sock_id)
     memcpy(msg_auth_1+msg_bytes_written, name, usernameSize);
     msg_bytes_written += usernameSize;
 
+cout << " DBG - M1: " << endl;
     BIO_dump_fp(stdout, (const char*)msg_auth_1, msg_bytes_written);
 
     // Send the message to the server
+cout << " DBG - Sending M1 to server " << endl;
     ret = send(sock_id, (void*)msg_auth_1, msg_bytes_written, 0);
     if(ret<=0 || ret != msg_bytes_written){
         free(msg_auth_1);
@@ -500,6 +504,7 @@ int authentication(int sock_id)
     /*************************************************************
      * M2 - Wait for message from the server
      *************************************************************/
+cout << " DBG - Wait for M2" << endl;
     // wait for nonce
     server_nonce = (unsigned char*)malloc(NONCE_SIZE);
     if(!server_nonce){
@@ -514,6 +519,7 @@ int authentication(int sock_id)
     }
 
     // Read the length of the DH server pub key
+cout << " DBG - Read length of DH server pub key " << endl;
     ret = recv(sock_id, (void*)&dh_pub_srv_key_size, sizeof(int), 0);  
     if(ret <= 0){
         free(server_nonce);
@@ -523,6 +529,7 @@ int authentication(int sock_id)
     dh_pub_srv_key_size = ntohl(dh_pub_srv_key_size);
 
     // Read DH server pub key
+cout << " DBG - Read server pubkey " << endl;
     dh_server_pubkey = (unsigned char*)malloc(dh_pub_srv_key_size);
     if(!dh_server_pubkey){
         free(server_nonce);
@@ -537,6 +544,7 @@ int authentication(int sock_id)
     }
 
     // Read signature length
+cout << " DBG - Read signature length " << endl;
     ret = recv(sock_id, (void*)&len_signature, sizeof(uint32_t), 0);  
     if(ret <= 0 || ret!=sizeof(uint32_t)){
         free(server_nonce);
@@ -548,6 +556,7 @@ int authentication(int sock_id)
 
     
     // Read signature
+cout << " DBG - Read signature " << endl;
     signature = (unsigned char*)malloc(len_signature);
     if(!signature){
         free(server_nonce);
@@ -565,6 +574,7 @@ int authentication(int sock_id)
     }
     
     // Read certificate length
+cout << " DBG - Read certificate length " << endl;
     ret = recv(sock_id, (void*)&cert_length, sizeof(uint32_t), 0);  
     if(ret <= 0 || ret!=sizeof(uint32_t)){
         free(server_nonce);
@@ -576,6 +586,7 @@ int authentication(int sock_id)
     cert_length = ntohl(cert_length);
 
     // Read certificate
+cout << " DBG - Read length " << endl;
     server_cert = (unsigned char*)malloc(cert_length);
     if(!server_cert){
         free(server_nonce);
@@ -596,6 +607,7 @@ int authentication(int sock_id)
     }
 
     // Check the authenticity of the msg
+cout << " DBG - Check the authenticity of the msg " << endl;
     len_signed_msg = NONCE_SIZE*2+dh_pub_srv_key_size;
     signed_msg = (unsigned char*)malloc(len_signed_msg);
     if(!signed_msg){
@@ -635,6 +647,7 @@ int authentication(int sock_id)
     
     ret = verify_sign_cert(server_cert, cert_length, CA_cert_file, CA_crl_file, signature, len_signature, signed_msg, len_signed_msg);
     if(ret!=1){
+        cout << " The signature is not valir " << endl;
         free(server_nonce);
         free(nonce);
         free(dh_server_pubkey);
@@ -659,6 +672,7 @@ int authentication(int sock_id)
     /*************************************************************
      *  Generate (DH_pubKey_C, DH_privKey_C)
      *************************************************************/
+cout << " DBG - Generating DH pair " << endl;
     void* eph_dh_privKey = NULL;
     unsigned char* eph_dh_pubKey = NULL; 
     uint32_t eph_dh_pubKey_len;   
@@ -674,6 +688,7 @@ int authentication(int sock_id)
      * M3 - Send to the server my DHpubKey and the nonce R2
      *************************************************************/
     // Preparation of the message to sign
+cout << " DBG - Preparing M3 " << endl;
     uint32_t msg_to_sign_len = NONCE_SIZE+eph_dh_pubKey_len;
     unsigned char* msg_to_sign = (unsigned char*)malloc(msg_to_sign_len);
     if(!msg_to_sign){
@@ -747,9 +762,11 @@ int authentication(int sock_id)
         free(eph_dh_pubKey);
         return -1;
     }
+cout << " DBG - M3 :" << endl;
     BIO_dump_fp(stdout, (const char*)msg_to_send_M3, NONCE_SIZE);
 
     // Send the message to send to the server
+cout << " DBG - Sending M3 " << endl;
     ret = send(sock_id, (void*)msg_to_send_M3, msglen, 0);
     if(ret<=0 || ret != msglen){
         free(dh_server_pubkey);
@@ -767,6 +784,7 @@ int authentication(int sock_id)
     /*************************************************************
      * Derive the session key through the master secret
      *************************************************************/
+cout << " DBG - Deriving session key " << endl;
     unsigned char* secret = NULL;
     uint32_t secret_len = derive_secret(eph_dh_privKey, dh_server_pubkey, dh_pub_srv_key_size, &secret);
     if(secret_len==0){
@@ -789,11 +807,12 @@ int authentication(int sock_id)
         free(server_cert);
         free(session_key_clientToServer);
     }
-    
+    cout << " DBG - End of authentication " << endl;
     /************************************************************
      * End of Authentication 
      ************************************************************/
     // At the end of the authentication the server will send the id that he is assigned to me
+cout << " DBG - Retrieving user id " << endl;
     // TO DO
     int loggedUser_id_net_ct;
     ret = recv(sock_id, (void*)&loggedUser_id_net_ct, sizeof(int), 0);
