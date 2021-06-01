@@ -628,16 +628,17 @@ int handle_client_authentication(){
     // RECEIVING M1
     int ret;
     uint16_t R1;
-    // ret = recv(comm_socket_id, (void *)&R1, sizeof(NUANCE_DEFAULT), 0);
-    // if (ret < 0)
-    //     errorHandler(REC_ERR);
-    // if (ret == 0){
-    //     vlog("No message from the server");
-    //     exit(1);
-    // }
-    // R1 = ntohl(R1);
+    ret = recv(comm_socket_id, (void *)&R1, sizeof(NUANCE_DEFAULT), 0);
+    if (ret < 0)
+        errorHandler(REC_ERR);
+    if (ret == 0){
+        vlog("No message from the server");
+        exit(1);
+    }
+    R1 = ntohs(R1);
+    log("Received R1: " + to_string(R1));
 
-    uint16_t size;
+    uint32_t size;
     ret = recv(comm_socket_id, (void *)&size, sizeof(uint16_t), 0);
     if (ret < 0)
         errorHandler(REC_ERR);
@@ -645,10 +646,11 @@ int handle_client_authentication(){
         vlog("No message from the server");
         exit(1);
     }
-
-    size = ntohs(size);
+    size = ntohl(size);
+    log("Received size: " + to_string(size));
+    
     log("Received username size: " + to_string(size));
-    char* username = (char*)malloc(sizeof(char)*size);
+    char* username = (char*)malloc(sizeof(char)*size); //TODO: control size
     if(!username)
         errorHandler(MALLOC_ERR);
 
@@ -671,7 +673,9 @@ int handle_client_authentication(){
     }
 
 
-    // PREPARING M2
+    /*************************************************************
+     * M2 - Send R2,pubkey_eph,signature,certificate
+     *************************************************************/
     uchar* R2 = (uchar*)malloc(NUANCE_DEFAULT);
     if(!R2){
         errorHandler(MALLOC_ERR);
@@ -687,6 +691,8 @@ int handle_client_authentication(){
         log("Error on EPH_KEY_GENERATE");
         exit(1);
     }
+    log("auth (2) pubkey: ");
+    BIO_dump_fp(stdout, (const char*)eph_pubkey_s, pubkey_len);
 
     //Generate nuance R2
     ret = random_generate(NUANCE_DEFAULT, R2);
@@ -705,10 +711,12 @@ int handle_client_authentication(){
     }
     
     uchar* certificate_ser;
-    ret = serialize_certificate(cert_file, &certificate_ser);
-    if(ret == 0){
+    int certificate_len = serialize_certificate(cert_file, &certificate_ser);
+    if(certificate_len == 0){
         log("Error on serialize certificate");
     }
+    log("auth (3) certificate: ");
+    BIO_dump_fp(stdout, (const char*)certificate_ser, certificate_len);
 
     uint M2_to_sign_length = NUANCE_DEFAULT*2 + PUBKEY_DEFAULT, M2_signed_length;
     uchar* M2_to_sign = (uchar*)malloc(M2_to_sign_length);
