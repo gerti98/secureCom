@@ -17,6 +17,7 @@
 #include <sstream>
 #include "constant.h"
 #include "util.h"
+#include "crypto.h"
 
 
 using namespace std;
@@ -33,8 +34,10 @@ bool isChatting = false;
 /* This global variable is setted to true when an error occurs*/
 bool error = false;
 
-/* ID and username of the "logged" user*/
+/* Username of the "logged" user*/
 string loggedUser;
+
+/* Id of the logged user */
 int loggedUser_id;
 
 /* ID and username of the user that I am chatting with */
@@ -44,6 +47,11 @@ int peer_id;
 /* socket id*/
 int sock_id;                           
 
+/* Session key between client and server*/
+unsigned char* session_key_clientToServer = NULL;
+
+/* Server certificate */
+unsigned char* server_cert = NULL;
 
 //---------------- STRUCTURES ------------------//
 struct commandMSG
@@ -395,6 +403,7 @@ int receive_message(int sock_id, string& msg)
     return 0;
 }
 
+
 /**
  * @brief It performs the authentication procedure with the server
  * 
@@ -403,19 +412,27 @@ int receive_message(int sock_id, string& msg)
  */
 int authentication(int sock_id)
 {
-    bool tooBig = false;    // indicates if the username inserted by the user is too big
-    //string loggedUser;      // string which contains the user's username
-    int nonce;              // nonce R
-    int server_nonce;       // nonce R2 from the server
-    uint16_t usernameSize;
+    bool tooBig = false;                    // indicates if the username inserted by the user is too big
+    unsigned char* nonce = NULL;            // nonce R
+    unsigned char* server_nonce = NULL;     // nonce R2 from the server
+    uint16_t usernameSize;              
     uint16_t net_usernameSize;
-    unsigned char opcode = AUTH;
-    uint16_t size_to_allocate;
-    size_t msg_bytes_written;          // how many byte of the messagge I have been how_many_bytes_in_msg
+    uint16_t size_to_allocate;          
+    size_t msg_bytes_written;               // how many byte of the messagge I have been written
     int ret;
-    char* name = NULL;
-    unsigned char* msg_auth_1;
-    unsigned char srv_op;
+    unsigned char* name = NULL;
+    unsigned char* msg_auth_1 = NULL;
+
+    int dh_pub_srv_key_size;
+    unsigned char* dh_server_pubkey = NULL;
+
+    uint32_t len_signature;
+    uint32_t len_signed_msg;
+    unsigned char* signed_msg = NULL;
+    unsigned char* signature = NULL;
+
+    uint32_t cert_length;
+    unsigned char* server_cert = NULL;  
 
     // Acquire the username from stdin
     do{
@@ -428,81 +445,362 @@ int authentication(int sock_id)
             tooBig = true;
     }while(tooBig);
 
-    /*
+    /*************************************************************
      * M1 - Send R,username to the server
-     */
-
-
-/*  nonce = 2; // FOR NOW - THIS MUST BE CHANGED
-
-
-
-
-    usernameSize = loggedUser.size()+1;
-    name = (char*)malloc(usernameSize);
-    if(!name)
+     *************************************************************/
+    // Nonce Generation
+    cout << " DBG - Nonce generation " << endl;
+    nonce = (unsigned char*)malloc(NONCE_SIZE);
+    if(!nonce)
         return -1;
+    random_generate(NONCE_SIZE, nonce);
+    cout << " DBG - Nonnce generated: " << endl;
+    BIO_dump_fp(stdout, (const char*)nonce, NONCE_SIZE);
+
+    // Preparation of the username
+    usernameSize = loggedUser.size()+1; // +1 for string terminator
+    name = (unsigned char*)malloc(usernameSize);
+    if(!name){
+        free(nonce);
+        return -1;
+    }
     net_usernameSize = htons(usernameSize);
-    strncpy(name, loggedUser.c_str(), usernameSize);
+    strncpy((char*)name, loggedUser.c_str(), usernameSize);
     name[usernameSize-1] = '\0'; // to avoid error in strncpy
-    // Compose the message: OPCODE, R, USERNAME_SIZE, USERNAME
-    size_to_allocate = sizeof(unsigned char)+sizeof(int)+sizeof(uint16_t)+usernameSize;
-    msg_auth_1 = malloc(size_to_allocate);
-    if(!msg_auth_1)
+
+    // Composition of the message: OPCODE, R, USERNAME_SIZE, USERNAME
+    size_to_allocate = NONCE_SIZE+sizeof(uint16_t)+usernameSize;
+    msg_auth_1 = (unsigned char*)malloc(size_to_allocate);
+    if(!msg_auth_1){
+        free(name);
+        free(nonce);
         return -1;
-    memcpy(msg_auth_1, &opcode, sizeof(unsigned char));
-    msg_bytes_written = sizeof(unsigned char);
-    memcpy(msg_auth_1+msg_bytes_written, &nonce, sizeof(int));
-    msg_bytes_written += sizeof(int);
+    }
+    memcpy(msg_auth_1, nonce, NONCE_SIZE);
+    msg_bytes_written = NONCE_SIZE;
     memcpy(msg_auth_1+msg_bytes_written, &net_usernameSize, sizeof(uint16_t));
     msg_bytes_written += sizeof(uint16_t);
     memcpy(msg_auth_1+msg_bytes_written, name, usernameSize);
     msg_bytes_written += usernameSize;
+
+    BIO_dump_fp(stdout, (const char*)msg_auth_1, msg_bytes_written);
+
     // Send the message to the server
-    ret = send(sock_id, (void*)&msg_auth_1, msg_bytes_written, 0);
-    if(ret<=0 || ret != msg_bytes_written)
+    ret = send(sock_id, (void*)msg_auth_1, msg_bytes_written, 0);
+    if(ret<=0 || ret != msg_bytes_written){
+        free(msg_auth_1);
+        free(name);
+        free(nonce);
         return -1;
+    }
     // free message and unnecessary stuff
     free(msg_auth_1);
     free(name);
-*/
-    /*
-     * M2 - Wait for message from the server (with the server DHPubKey, the nonce and the certificate)
-     */
- /*   ret = recv(sock_id, (void*)&srv_op, sizeof(unsigned char), 0);  
-    if(ret <= 0)
-        return -1;
-    if(srv_op!=AUTH)
-        return -1;
-*/
 
-    /*
+    /*************************************************************
+     * M2 - Wait for message from the server
+     *************************************************************/
+    // wait for nonce
+    server_nonce = (unsigned char*)malloc(NONCE_SIZE);
+    if(!server_nonce){
+        free(nonce);
+        return -1;
+    }
+    ret = recv(sock_id, (void*)server_nonce, NONCE_SIZE, 0);  
+    if(ret <= 0){
+        free(server_nonce);
+        free(nonce);
+        return -1;
+    }
+
+    // Read the length of the DH server pub key
+    ret = recv(sock_id, (void*)&dh_pub_srv_key_size, sizeof(int), 0);  
+    if(ret <= 0){
+        free(server_nonce);
+        free(nonce);
+        return -1;
+    }
+    dh_pub_srv_key_size = ntohl(dh_pub_srv_key_size);
+
+    // Read DH server pub key
+    dh_server_pubkey = (unsigned char*)malloc(dh_pub_srv_key_size);
+    if(!dh_server_pubkey){
+        free(server_nonce);
+        free(nonce);
+    }
+    ret = recv(sock_id, (void*)dh_server_pubkey, dh_pub_srv_key_size, 0);  
+    if(ret <= 0 || ret != dh_pub_srv_key_size){
+        free(server_nonce);
+        free(nonce);
+        free(dh_server_pubkey);
+        return -1;
+    }
+
+    // Read signature length
+    ret = recv(sock_id, (void*)&len_signature, sizeof(uint32_t), 0);  
+    if(ret <= 0 || ret!=sizeof(uint32_t)){
+        free(server_nonce);
+        free(nonce);
+        free(dh_server_pubkey);
+        return -1;
+    }
+    len_signature = ntohl(len_signature);
+
+    
+    // Read signature
+    signature = (unsigned char*)malloc(len_signature);
+    if(!signature){
+        free(server_nonce);
+        free(nonce);
+        free(dh_server_pubkey);
+        return -1;
+    }
+    ret = recv(sock_id, (void*)signature, len_signature, 0);  
+    if(ret <= 0 || ret!=len_signature){
+        free(server_nonce);
+        free(nonce);
+        free(dh_server_pubkey);
+        free(signature);
+        return -1;
+    }
+    
+    // Read certificate length
+    ret = recv(sock_id, (void*)&cert_length, sizeof(uint32_t), 0);  
+    if(ret <= 0 || ret!=sizeof(uint32_t)){
+        free(server_nonce);
+        free(nonce);
+        free(dh_server_pubkey);
+        free(signature);
+        return -1;
+    }
+    cert_length = ntohl(cert_length);
+
+    // Read certificate
+    server_cert = (unsigned char*)malloc(cert_length);
+    if(!server_cert){
+        free(server_nonce);
+        free(nonce);
+        free(dh_server_pubkey);
+        free(signature);
+        return -1;
+    }
+    ret = recv(sock_id, (void*)server_cert, cert_length, 0);  
+    if(ret <= 0 || ret!=cert_length){
+        free(server_nonce);
+        free(nonce);
+        free(dh_server_pubkey);
+        free(signed_msg);
+        free(signature);
+        free(server_cert);
+        return -1;
+    }
+
+    // Check the authenticity of the msg
+    len_signed_msg = NONCE_SIZE*2+dh_pub_srv_key_size;
+    signed_msg = (unsigned char*)malloc(len_signed_msg);
+    if(!signed_msg){
+        free(server_nonce);
+        free(nonce);
+        free(dh_server_pubkey);
+        free(signature);
+        free(server_cert);
+        return -1;
+    }
+
+    memcpy(signed_msg, nonce, NONCE_SIZE);
+    memcpy(signed_msg+NONCE_SIZE, server_nonce, NONCE_SIZE);
+    memcpy(signed_msg+(2*NONCE_SIZE), dh_server_pubkey, dh_pub_srv_key_size);
+
+    FILE* CA_cert_file = fopen("certification/TrustMe_CA_cert.pem","rb");
+    if(!CA_cert_file){
+        free(server_nonce);
+        free(nonce);
+        free(dh_server_pubkey);
+        free(signed_msg);
+        free(signature);
+        free(server_cert);
+        return -1;
+    }
+    FILE* CA_crl_file = fopen("certification/TrustMe_CA_crl.pem","rb");
+    if(!CA_crl_file){
+        free(server_nonce);
+        free(nonce);
+        free(dh_server_pubkey);
+        free(signed_msg);
+        free(signature);
+        free(server_cert);
+        fclose(CA_cert_file);
+        return -1;
+    }
+    
+    ret = verify_sign_cert(server_cert, cert_length, CA_cert_file, CA_crl_file, signature, len_signature, signed_msg, len_signed_msg);
+    if(ret!=1){
+        free(server_nonce);
+        free(nonce);
+        free(dh_server_pubkey);
+        free(signed_msg);
+        free(signature);
+        free(server_cert);
+        fclose(CA_cert_file);
+        fclose(CA_crl_file);
+        return -1;
+    }
+
+    // Close and free the unnecessary stuff
+    fclose(CA_cert_file);
+    fclose(CA_crl_file);
+    free(signature);
+    free(signed_msg);
+    free(nonce);
+
+    // Verify the authenticity of the server pub key ?
+    
+
+    /*************************************************************
+     *  Generate (DH_pubKey_C, DH_privKey_C)
+     *************************************************************/
+    void* eph_dh_privKey = NULL;
+    unsigned char* eph_dh_pubKey = NULL; 
+    uint32_t eph_dh_pubKey_len;   
+    ret = eph_key_generate(&eph_dh_privKey, &eph_dh_pubKey, &eph_dh_pubKey_len);
+    if(ret!=1){
+        free(server_nonce);
+        free(dh_server_pubkey);
+        free(server_cert);
+        return -1;
+    }
+
+    /*************************************************************
      * M3 - Send to the server my DHpubKey and the nonce R2
-     */
-
-    /*
-     * Derive the session key through the master secret
-     */
-
-    // For now the authentication phase consists in sending the username to the server
-    // first - send the size
-    uint16_t stringsize = loggedUser.size()+1;
-    uint16_t net_stringsize = htons(stringsize);
-    ret = send(sock_id, (void*)&net_stringsize, sizeof(uint16_t), 0);
-    if(ret<=0 || ret != sizeof(uint16_t))
+     *************************************************************/
+    // Preparation of the message to sign
+    uint32_t msg_to_sign_len = NONCE_SIZE+eph_dh_pubKey_len;
+    unsigned char* msg_to_sign = (unsigned char*)malloc(msg_to_sign_len);
+    if(!msg_to_sign){
+        free(server_nonce);
+        free(dh_server_pubkey);
+        free(server_cert);
+        free(eph_dh_privKey);
+        free(eph_dh_pubKey);
         return -1;
+    }
 
-    // second - send the username
-    ret = send(sock_id, (void*)loggedUser.c_str(), stringsize, 0);
-    if(ret<=0 || ret != stringsize)
+    memcpy(msg_to_sign, server_nonce, NONCE_SIZE);
+    memcpy(msg_to_sign+NONCE_SIZE, eph_dh_pubKey, eph_dh_pubKey_len);
+
+    unsigned char* client_signature = NULL;
+    uint32_t client_sign_len;
+    string privkey_file_path = "certification/"+loggedUser+"_privkey.pem";
+    FILE* privKey_file = fopen(privkey_file_path.c_str(), "rb");
+    if(!privKey_file){
+        free(server_nonce);
+        free(dh_server_pubkey);
+        free(server_cert);
+        free(msg_to_sign);
+        free(eph_dh_privKey);
+        free(eph_dh_pubKey);
+        return -1;
+    }
+    ret = sign_document(msg_to_sign, msg_to_sign_len, privKey_file, &client_signature, &client_sign_len);
+    if(ret!=1){
+        free(server_nonce);
+        free(dh_server_pubkey);
+        free(server_cert);
+        free(msg_to_sign);
+        fclose(privKey_file);
+        free(eph_dh_privKey);
+        free(eph_dh_pubKey);
+        return -1;
+    }
+
+    free(server_nonce);
+    fclose(privKey_file);
+    free(msg_to_sign);
+
+    // Building the message to send
+    uint32_t msglen = sizeof(uint32_t)+eph_dh_pubKey_len+sizeof(uint32_t)+client_sign_len;
+    unsigned char* msg_to_send_M3 = (unsigned char*)malloc(msglen);
+    if(!msg_to_send_M3){
+        free(dh_server_pubkey);
+        free(server_cert);
+        free(client_signature);
+        free(eph_dh_privKey);
+        free(eph_dh_pubKey);
+        return -1;
+    }
+
+    msg_bytes_written = 0;
+    memcpy(msg_to_send_M3, &eph_dh_pubKey_len, sizeof(uint32_t));
+    msg_bytes_written += sizeof(uint32_t);
+    memcpy(msg_to_send_M3, eph_dh_pubKey, eph_dh_pubKey_len);
+    msg_bytes_written += eph_dh_pubKey_len;
+    memcpy(msg_to_send_M3, &client_sign_len, sizeof(uint32_t));
+    msg_bytes_written += sizeof(uint32_t);
+    memcpy(msg_to_send_M3, client_signature, client_sign_len);
+    msg_bytes_written += client_sign_len;
+    if(msg_bytes_written != msglen){
+        free(dh_server_pubkey);
+        free(server_cert);
+        free(client_signature);
+        free(msg_to_send_M3);
+        free(eph_dh_privKey);
+        free(eph_dh_pubKey);
+        return -1;
+    }
+    BIO_dump_fp(stdout, (const char*)msg_to_send_M3, NONCE_SIZE);
+
+    // Send the message to send to the server
+    ret = send(sock_id, (void*)msg_to_send_M3, msglen, 0);
+    if(ret<=0 || ret != msglen){
+        free(dh_server_pubkey);
+        free(server_cert);
+        free(client_signature);
+        free(msg_to_send_M3);
+        free(eph_dh_privKey);
+        free(eph_dh_pubKey);
+        return -1;
+    }
+
+    free(msg_to_send_M3);
+    free(client_signature);
+
+    /*************************************************************
+     * Derive the session key through the master secret
+     *************************************************************/
+    unsigned char* secret = NULL;
+    uint32_t secret_len = derive_secret(eph_dh_privKey, dh_server_pubkey, dh_pub_srv_key_size, &secret);
+    if(secret_len==0){
+        free(dh_server_pubkey);
+        free(server_cert);
+        free(eph_dh_privKey);
+        free(eph_dh_pubKey);
+        return -1;
+    }
+
+    free(dh_server_pubkey);
+    free(eph_dh_privKey);
+    free(eph_dh_pubKey);
+    free(secret);
+
+    session_key_clientToServer = NULL;
+    uint32_t keylen;
+    keylen = default_digest(secret, secret_len, &session_key_clientToServer);
+    if(keylen==0){
+        free(server_cert);
+        free(session_key_clientToServer);
+    }
+    
+    /************************************************************
+     * End of Authentication 
+     ************************************************************/
+    // At the end of the authentication the server will send the id that he is assigned to me
+    // TO DO
+    int loggedUser_id_net_ct;
+    ret = recv(sock_id, (void*)&loggedUser_id_net_ct, sizeof(int), 0);
+    if(ret <= 0)
         return -1;
     
-    // At the end of the authentication the server will send the id that he is assigned to me
-    int loggedUser_id_net;
-    ret = recv(sock_id, (void*)&loggedUser_id_net, sizeof(int), 0);
-    if(ret <= 0)
-        return -1;
-    loggedUser_id = ntohl(loggedUser_id_net);
+    loggedUser_id = ntohl(loggedUser_id_net_ct);
     cout << " I'm the user with ID " << loggedUser_id << endl;  
     
 
@@ -1141,13 +1439,14 @@ int main(int argc, char* argv[])
             if (FD_ISSET(fileno(stdin), &fdlist)!=0) {
                 // The output must be read even if need_server_answer is false
                 cin >> userInput; // command from terminal arrived
-                if(!need_server_answer)
+                if(!need_server_answer){
                     ret = commandHandler(userInput);
                     if(ret<0){
                         error = true;
                         perror("cin");
                         errorHandler(GEN_ERR);
                         goto close_all;
+                    }
                 }
                 if(ret==2)
                     need_server_answer=true;
@@ -1185,6 +1484,9 @@ int main(int argc, char* argv[])
 close_all:
     if(msgGenToSend.payload)
         free(msgGenToSend.payload);
+
+    free(server_cert);
+    free(session_key_clientToServer);
 
     free_list_users(user_list);
     close(sock_id);
