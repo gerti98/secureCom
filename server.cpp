@@ -625,53 +625,59 @@ int handle_msg(){
  * @return user_id of the client or -1 if not present in the user store or in case of errors
  */
 int handle_client_authentication(){
-    // RECEIVING M1
+    /*************************************************************
+     * M1 - R1 and Username
+     *************************************************************/
     int ret;
-    uint16_t R1;
-    ret = recv(comm_socket_id, (void *)&R1, sizeof(NUANCE_DEFAULT), 0);
-    if (ret < 0)
-        errorHandler(REC_ERR);
-    if (ret == 0){
-        vlog("No message from the server");
-        exit(1);
-    }
-    R1 = ntohs(R1);
-    log("Received R1: " + to_string(R1));
-
-    uint32_t size;
-    ret = recv(comm_socket_id, (void *)&size, sizeof(uint16_t), 0);
-    if (ret < 0)
-        errorHandler(REC_ERR);
-    if (ret == 0){
-        vlog("No message from the server");
-        exit(1);
-    }
-    size = ntohl(size);
-    log("Received size: " + to_string(size));
-    
-    log("Received username size: " + to_string(size));
-    char* username = (char*)malloc(sizeof(char)*size); //TODO: control size
-    if(!username)
+    uchar* R1 = (uchar*)malloc(NONCE_SIZE);
+    if(!R1){
         errorHandler(MALLOC_ERR);
-
-    ret = recv(comm_socket_id, (void *)username, size, 0);
-    if (ret < 0)
-        errorHandler(REC_ERR);
-    if (ret == 0){
-        vlog("No message from the server");
         exit(1);
     }
-    
+
+    ret = recv(comm_socket_id, (void *)R1, NONCE_SIZE, 0);
+    if (ret <= 0 || ret != NONCE_SIZE){
+        errorHandler(REC_ERR);
+        exit(1);
+    }
+    log("M1 auth (0) Received R1: ");
+    BIO_dump_fp(stdout, (const char*)R1, NONCE_SIZE);
+
+    uint32_t client_username_len;
+    ret = recv(comm_socket_id, (void *)&client_username_len, sizeof(uint32_t), 0);
+    if (ret <= 0 || ret != sizeof(uint32_t)){
+        errorHandler(REC_ERR);
+        exit(1);
+    }
+    client_username_len = ntohl(client_username_len);
+    log("M1 auth (1) Received username size: " + to_string(client_username_len));
+
+    char* username = (char*)malloc(sizeof(char)*client_username_len); //TODO: control size
+    if(!username){
+        errorHandler(MALLOC_ERR);
+        free(R1);
+        exit(1);
+    }
+
+    ret = recv(comm_socket_id, (void *)username, client_username_len, 0);
+    if (ret <= 0 || ret != client_username_len){
+        errorHandler(REC_ERR);
+        free(username);
+        free(R1);
+        exit(1);
+    }
     string client_username(username);
-    log("Received username: " + client_username);
-    
+    log("M1 auth (2) Received username: " + client_username);
+
     ret = set_user_socket(client_username, comm_socket_id); //to test the client
     if(ret != 1){
         cerr << "User not exist!" << endl;
         free(username);
+        free(R1);
         exit(1);
     }
 
+    free(username);
 
     /*************************************************************
      * M2 - Send R2,pubkey_eph,signature,certificate
@@ -679,124 +685,248 @@ int handle_client_authentication(){
     uchar* R2 = (uchar*)malloc(NUANCE_DEFAULT);
     if(!R2){
         errorHandler(MALLOC_ERR);
+        free(R1);
+        exit(1);
     }
-
 
     //Generate pair of ephermeral DH keys
     void* eph_privkey_s;
     uchar* eph_pubkey_s;
-    uint pubkey_len = PUBKEY_DEFAULT;
-    ret = eph_key_generate(&eph_privkey_s, &eph_pubkey_s, &pubkey_len);
+    uint eph_pubkey_s_len;
+    ret = eph_key_generate(&eph_privkey_s, &eph_pubkey_s, &eph_pubkey_s_len);
     if(ret != 1){
         log("Error on EPH_KEY_GENERATE");
+        free(R2);
+        free(R1);
+        free(eph_privkey_s);
+        free(eph_pubkey_s);
         exit(1);
     }
-    log("auth (2) pubkey: ");
-    BIO_dump_fp(stdout, (const char*)eph_pubkey_s, pubkey_len);
+    log("M2 auth (1) pubkey: ");
+    BIO_dump_fp(stdout, (const char*)eph_pubkey_s, eph_pubkey_s_len);
 
     //Generate nuance R2
     ret = random_generate(NUANCE_DEFAULT, R2);
     if(ret != 1){
         log("Error on random_generate");
+        free(R2);
+        free(R1);
+        free(eph_privkey_s);
+        free(eph_pubkey_s);
         exit(1);
     }
+
     log("auth (2) R2: ");
-    BIO_dump_fp(stdout, (const char*)R2, NUANCE_DEFAULT);
+    BIO_dump_fp(stdout, (const char*)R2, NONCE_SIZE);
 
     //Get certificate of Server
-    FILE* cert_file = fopen("certification/SecureCom_cert.pem", "rb");
+    FILE* cert_file = fopen("certification/SecureCom_cert(TM).pem", "rb"); //TODO: Maybe it's wrong this file
     if(!cert_file){
         log("Error on opening cert file");
+        free(R2);
+        free(R1);
+        free(eph_privkey_s);
+        free(eph_pubkey_s);
         exit(1);
     }
     
     uchar* certificate_ser;
-    int certificate_len = serialize_certificate(cert_file, &certificate_ser);
+    uint certificate_len = serialize_certificate(cert_file, &certificate_ser);
     if(certificate_len == 0){
         log("Error on serialize certificate");
+        fclose(cert_file);
+        free(R2);
+        free(R1);
+        free(eph_privkey_s);
+        free(eph_pubkey_s);
+        exit(1);
     }
     log("auth (3) certificate: ");
     BIO_dump_fp(stdout, (const char*)certificate_ser, certificate_len);
 
-    uint M2_to_sign_length = NUANCE_DEFAULT*2 + PUBKEY_DEFAULT, M2_signed_length;
-    uchar* M2_to_sign = (uchar*)malloc(M2_to_sign_length);
+    uint M2_to_sign_length = NONCE_SIZE*2 + eph_pubkey_s_len, M2_signed_length;
     uchar* M2_signed;
+    uchar* M2_to_sign = (uchar*)malloc(M2_to_sign_length);
     if(!M2_to_sign){
         log("Error on M2_to_sign");
+        free(R2);
+        free(R1);
+        free(eph_privkey_s);
+        free(eph_pubkey_s);
         exit(1);
     }
 
     memcpy(M2_to_sign, &R1, sizeof(uint16_t));
     memcpy((void*)(M2_to_sign + 2), &R2, sizeof(uint16_t));
-    memcpy((void*)(M2_to_sign + 4), eph_pubkey_s, PUBKEY_DEFAULT);
-
-    FILE* server_key = fopen("certification/SecureCom_key.pem", "rb");
+    memcpy((void*)(M2_to_sign + 4), eph_pubkey_s, eph_pubkey_s_len);
+    log("auth (4) M2_to_sign: ");
+    BIO_dump_fp(stdout, (const char*)M2_to_sign, M2_to_sign_length);
+    FILE* server_key = fopen("certification/SecureCom_key.pem", "rb"); //TODO: Maybe it's wrong this file
     if(!server_key){
         log("Error on opening key file");
+        free(R2);
+        free(R1);
+        free(M2_to_sign);
+        free(eph_privkey_s);
+        free(eph_pubkey_s);
         exit(1);
     }
 
     ret = sign_document(M2_to_sign, M2_to_sign_length, server_key,&M2_signed, &M2_signed_length);
     if(ret != 1){
         log("Error on signing part on M2");
+        free(R2);
+        free(R1);
+        free(M2_to_sign);
+        free(eph_privkey_s);
+        free(eph_pubkey_s);
         exit(1);
     }
 
     //Send M2 part by part
-    // ret = send(comm_socket_id, eph_pubkey_s, PUBKEY_DEFAULT, 0);
-    // if(ret <= PUBKEY_DEFAULT){
-    //     errorHandler(SEND_ERR);
-    //     exit(1);
-    // }    
-    // ret = send(comm_socket_id, &R2, NUANCE_DEFAULT, 0);
-    // if(ret <= NUANCE_DEFAULT){
-    //     errorHandler(SEND_ERR);
-    //     exit(1);
-    // }
-    // ret = send(comm_socket_id, M2_signed, M2_signed_length, 0);
-    // if(ret <= M2_signed_length){
-    //     errorHandler(SEND_ERR);
-    //     exit(1);
-    // }
-    // ret = send(comm_socket_id, certificate_ser,);
-    // if(ret <= ){
-    //     errorHandler(SEND_ERR);
-    //     exit(1);
-    // }
-
-
-
-    //Receiving M3
-    // uchar* eph_pubkey_c = (uchar*)malloc(PUBKEY_DEFAULT);
-    // if(!eph_pubkey_c){
-    //     errorHandler(MALLOC_ERR);
-    //     exit(1);
-    // }
-
-    // ret = recv(comm_socket_id, eph_pubkey_c, PUBKEY_DEFAULT, 0);
-    // if(ret <= 0){
-    //     errorHandler(REC_ERR);
-    //     exit(1);
-    // }
-
-    // //TODO: need to know certificate length for M2 and M3
-    // uchar* M3_signed = (uchar*)malloc(...);
-    // if(!M3_signed){
-    //     errorHandler(MALLOC_ERR);
-    //     exit(1);
-    // }
-    // ret = recv(comm_socket_id, M3_signed, ..., 0);
-    // if(ret <= 0){
-    //     errorHandler(REC_ERR);
-    //     exit(1);
-    // }
-
-    // verify_sign_pubkey();
-    // derive_secret();
-
-
-
     
+    uint M2_size = NONCE_SIZE + 3*sizeof(uint) + eph_pubkey_s_len + M2_signed_length + certificate_len;
+    uint offset = 0;
+    uchar* M2 = (uchar*)malloc(M2_size);
+    uint eph_pubkey_s_len_net = htonl(eph_pubkey_s_len);
+    uint M2_signed_length_net = htonl(M2_signed_length);
+    uint certificate_len_net = htonl(certificate_len);
+    log("Copying");
+    memcpy((void*)(M2 + offset), R2, NONCE_SIZE);
+    offset += NONCE_SIZE;
+    log(to_string(offset));
+    memcpy((void*)(M2 + offset), &eph_pubkey_s_len_net, sizeof(uint));
+    offset += sizeof(uint);
+    log(to_string(offset));
+    memcpy((void*)(M2 + offset), eph_pubkey_s, eph_pubkey_s_len);
+    offset += eph_pubkey_s_len;
+    log(to_string(offset));
+    memcpy((void*)(M2 + offset), &M2_signed_length_net ,sizeof(uint));
+    offset += sizeof(uint);
+    log(to_string(offset));
+    memcpy((void*)(M2 + offset), M2_signed,M2_signed_length);
+    offset += M2_signed_length;
+    log(to_string(offset));
+    memcpy((void*)(M2 + offset), &certificate_len_net ,sizeof(uint));
+    offset += sizeof(uint);
+    log(to_string(offset));
+    memcpy((void*)(M2 + offset), certificate_ser, certificate_len);
+    offset += certificate_len;
+    log(to_string(offset));
+
+    log("M2 size: " + to_string(M2_size));
+    
+    ret = send(comm_socket_id, M2, M2_size, 0);
+    if(ret < M2_size){
+        errorHandler(SEND_ERR);
+        free(R2);
+        free(R1);
+        free(M2_to_sign);
+        free(eph_privkey_s);
+        free(eph_pubkey_s);
+        exit(1);
+    }
+    log("M2 sent");
+    BIO_dump_fp(stdout, (const char*)M2, offset);
+
+    free(M2);
+    free(R1);
+    free(M2_to_sign);
+    free(eph_privkey_s);
+    free(eph_pubkey_s);
+
+    /*************************************************************
+     * M3 - client_pubkey and signing of pubkey and R2
+     *************************************************************/
+    uint32_t eph_pubkey_c_len;
+    ret = recv(comm_socket_id, &eph_pubkey_c_len, sizeof(uint32_t), 0);
+    if(ret <= 0 || ret != sizeof(uint32_t)){
+        errorHandler(REC_ERR);
+        free(R2);
+        exit(1);
+    }
+    eph_pubkey_c_len = ntohl(eph_pubkey_c_len);
+    log("M3 auth (1) pubkey_c_len: "+ to_string(eph_pubkey_c_len));
+
+    uchar* eph_pubkey_c = (uchar*)malloc(eph_pubkey_c_len);
+    if(!eph_pubkey_c || ret != sizeof(uint32_t)){
+        errorHandler(MALLOC_ERR);
+        free(R2);
+        exit(1);
+    }
+
+    ret = recv(comm_socket_id, eph_pubkey_c, PUBKEY_DEFAULT, 0);
+    if(ret <= 0){
+        errorHandler(REC_ERR);
+        free(R2);
+        free(eph_pubkey_c);
+        exit(1);
+    }
+    log("M3 auth (2) pubkey_c:");
+    BIO_dump_fp(stdout, (const char*)eph_pubkey_c, eph_pubkey_c_len);
+
+    uint32_t m3_signature_len;
+    ret = recv(comm_socket_id, &m3_signature_len, sizeof(uint32_t), 0);
+    if(ret <= 0){
+        errorHandler(REC_ERR);
+        free(R2);
+        free(eph_pubkey_c);
+        exit(1);
+    }
+    m3_signature_len = ntohl(m3_signature_len);
+    log("M3 auth (3) m3_signature_len: "+ to_string(m3_signature_len));
+
+    //TODO: need to know certificate length for M3
+    uchar* M3_signed = (uchar*)malloc(m3_signature_len); //TODO: control tainted
+    if(!M3_signed){
+        errorHandler(MALLOC_ERR);
+        free(R2);
+        free(eph_pubkey_c);
+        exit(1);
+    }
+    ret = recv(comm_socket_id, M3_signed, m3_signature_len, 0);
+    if(ret <= 0){
+        errorHandler(REC_ERR);
+        free(R2);
+        free(eph_pubkey_c);
+        free(M3_signed);
+        exit(1);
+    }
+
+    log("auth (4) M3 signed:");
+    BIO_dump_fp(stdout, (const char*)M3_signed, m3_signature_len);
+
+    string pubkey_of_client_path = "certificate/" + client_username + "_pubkey.pem";
+    FILE* pubkey_of_client = fopen(pubkey_of_client_path.c_str(), "rb");
+    if(!pubkey_of_client){
+        log("Unable to open pubkey of client");
+        free(R2);
+        free(eph_pubkey_c);
+        free(M3_signed);
+        exit(1);
+    }
+
+    uint m3_document_size = eph_pubkey_c_len + NUANCE_DEFAULT;
+    uchar* m3_document = (uchar*)malloc(m3_document_size);
+    if(!m3_document){
+        errorHandler(MALLOC_ERR);
+        free(R2);
+        free(eph_pubkey_c);
+        free(M3_signed);
+        exit(1);
+    }
+
+    verify_sign_pubkey(M3_signed, m3_signature_len,m3_document,m3_document_size, pubkey_of_client);
+    uchar* session_key; //Already hashed by the derive secret
+    derive_secret((void*)eph_privkey_s, eph_pubkey_c, eph_pubkey_c_len, &session_key);
+
+    log("Session key generated!");
+
+    free(R2);
+    free(eph_pubkey_c);
+    free(M3_signed);
+
+    ///STILL UNSECURE
     //Send user id of the client 
     int client_user_id = get_user_id_by_username(client_username);
     int client_user_id_net = htonl(client_user_id);

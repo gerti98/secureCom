@@ -265,6 +265,9 @@ int retrieveOnlineUsers(int sock_id, user*& user_list)
         }
 
         tmp->username = (unsigned char*)malloc(username_size+1);
+        if(!tmp->username)
+            errorHandler(MALLOC_ERR);
+        
         ret = recv(sock_id, (void*)(tmp->username), username_size, 0);  
         if(ret <= 0) {   
             free(tmp->username);
@@ -415,8 +418,8 @@ int authentication(int sock_id)
     bool tooBig = false;                    // indicates if the username inserted by the user is too big
     unsigned char* nonce = NULL;            // nonce R
     unsigned char* server_nonce = NULL;     // nonce R2 from the server
-    uint16_t usernameSize;              
-    uint16_t net_usernameSize;
+    uint32_t usernameSize;              
+    uint32_t net_usernameSize;
     uint16_t size_to_allocate;          
     size_t msg_bytes_written;               // how many byte of the messagge I have been written
     int ret;
@@ -449,7 +452,7 @@ int authentication(int sock_id)
      * M1 - Send R,username to the server
      *************************************************************/
     // Nonce Generation
-cout << " DBG - Nonce generation " << endl;
+    cout << " DBG - Nonce generation " << endl;
     nonce = (unsigned char*)malloc(NONCE_SIZE);
     if(!nonce)
         return -1;
@@ -465,7 +468,7 @@ cout << " DBG - Preparation of the usename " << endl;
         free(nonce);
         return -1;
     }
-    net_usernameSize = htons(usernameSize);
+    net_usernameSize = htonl(usernameSize);
     strncpy((char*)name, loggedUser.c_str(), usernameSize);
     name[usernameSize-1] = '\0'; // to avoid error in strncpy
 
@@ -480,8 +483,8 @@ cout << " DBG - Composition of the message " << endl;
     }
     memcpy(msg_auth_1, nonce, NONCE_SIZE);
     msg_bytes_written = NONCE_SIZE;
-    memcpy(msg_auth_1+msg_bytes_written, &net_usernameSize, sizeof(uint16_t));
-    msg_bytes_written += sizeof(uint16_t);
+    memcpy(msg_auth_1+msg_bytes_written, &net_usernameSize, sizeof(uint32_t));
+    msg_bytes_written += sizeof(uint32_t);
     memcpy(msg_auth_1+msg_bytes_written, name, usernameSize);
     msg_bytes_written += usernameSize;
 
@@ -807,7 +810,7 @@ cout << " DBG - Deriving session key " << endl;
         free(server_cert);
         free(session_key_clientToServer);
     }
-    cout << " DBG - End of authentication " << endl;
+    
     /************************************************************
      * End of Authentication 
      ************************************************************/

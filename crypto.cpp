@@ -402,7 +402,7 @@ uint sha_256_digest(uchar* plaintext, uint plaintext_len, uchar** chipertext){
 }
 
 uint default_digest(uchar* plaintext, uint plaintext_len, uchar** chipertext){
-    return digest(DIEGST_DEFAULT, plaintext, plaintext_len, chipertext);
+    return digest(DIGEST_DEFAULT, plaintext, plaintext_len, chipertext);
 }
 
 int serialize_certificate(FILE* cert_file, uchar** certificate){
@@ -466,7 +466,7 @@ int _verify_sing_pubkey(uchar* signature, uint sign_lenght, uchar* document, uin
     int ret; // used for return values
     // create the signature context:
     // declare some useful variables:
-    const EVP_MD* md = DIEGST_DEFAULT;
+    const EVP_MD* md = DIGEST_DEFAULT;
     EVP_MD_CTX* md_ctx = EVP_MD_CTX_new();
     if(!md_ctx){ cerr << "Error: EVP_MD_CTX_new returned NULL\n"; return 0; }
 
@@ -563,7 +563,7 @@ int sign_document( const uchar* document, uint doc_lenght, FILE* const priv_key,
 
     // declare some useful variables:
     int ret;
-    const EVP_MD* md = DIEGST_DEFAULT;
+    const EVP_MD* md = DIGEST_DEFAULT;
 
     // create the signature context:
     EVP_MD_CTX* md_ctx = EVP_MD_CTX_new();
