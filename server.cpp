@@ -56,6 +56,9 @@ msg_to_relay relay_msg;
 const char *srv_ipv4 = "127.0.0.1";
 const int srv_port = 4242;
 
+uchar* session_key;
+uint32_t session_key_len;
+
 //Handling mutual exclusion for accessing the user datastore
 const char* sem_user_store_name = "/user_store";
 const char* message_queue_name = "/user_message_queue";
@@ -620,6 +623,11 @@ int handle_msg(){
     return 0;
 }
 
+// ---------------------------------------------------------------------
+// FUNCTIONS of SECURITY
+// ---------------------------------------------------------------------
+
+
 /**
  * @brief handle authentication with the client
  * @return user_id of the client or -1 if not present in the user store or in case of errors
@@ -832,7 +840,6 @@ int handle_client_authentication(){
     free(M2);
     free(R1);
     free(M2_to_sign);
-    free(eph_privkey_s);
     free(eph_pubkey_s);
 
     /*************************************************************
@@ -845,8 +852,9 @@ int handle_client_authentication(){
         free(R2);
         exit(1);
     }
-    //eph_pubkey_c_len = ntohl(eph_pubkey_c_len);
-    eph_pubkey_c_len =178;
+    
+    eph_pubkey_c_len = ntohl(eph_pubkey_c_len);
+    //eph_pubkey_c_len =178;
     log("M3 auth (1) pubkey_c_len: "+ to_string(eph_pubkey_c_len));
 
     uchar* eph_pubkey_c = (uchar*)malloc(eph_pubkey_c_len);
@@ -864,9 +872,6 @@ int handle_client_authentication(){
         exit(1);
     }
     log("M3 auth (2) pubkey_c:");
-    int s;
-    cin>>s;
-
     BIO_dump_fp(stdout, (const char*)eph_pubkey_c, eph_pubkey_c_len);
 
     uint32_t m3_signature_len;
@@ -878,10 +883,8 @@ int handle_client_authentication(){
         exit(1);
     }
     m3_signature_len = ntohl(m3_signature_len);
-    m3_signature_len = 178;
     log("M3 auth (3) m3_signature_len: "+ to_string(m3_signature_len));
 
-    //TODO: need to know certificate length for M3
     uchar* M3_signed = (uchar*)malloc(m3_signature_len); //TODO: control tainted
     if(!M3_signed){
         errorHandler(MALLOC_ERR);
@@ -923,14 +926,26 @@ int handle_client_authentication(){
 
     memcpy(m3_document, eph_pubkey_c,eph_pubkey_c_len );
     memcpy(m3_document+eph_pubkey_c_len, R2, NONCE_SIZE);
-    verify_sign_pubkey(M3_signed, m3_signature_len,m3_document,m3_document_size, pubkey_of_client);
-    uchar* session_key; //Already hashed by the derive secret
-    derive_secret((void*)eph_privkey_s, eph_pubkey_c, eph_pubkey_c_len, &session_key);
+    log("auth (5) M3, verifying sign");
+    ret = verify_sign_pubkey(M3_signed, m3_signature_len,m3_document,m3_document_size, pubkey_of_client);
+    if(ret == 0){
+        log("Failed sign verification on M3");
+        free(eph_pubkey_c);
+        free(M3_signed);
+        exit(1);
+    }
+
+    log("auth (6) Creating session key");
+    session_key_len = derive_secret(eph_privkey_s, eph_pubkey_c, eph_pubkey_c_len, &session_key);
+    if(session_key_len == 0){
+        log("Failed derive secret");
+        free(eph_pubkey_c);
+        free(M3_signed);
+        exit(1);    
+    }
 
     log("Session key generated!");
-
-    free(R2);
-    free(eph_pubkey_c);
+    BIO_dump_fp(stdout, (const char*) session_key, session_key_len);
     free(M3_signed);
 
     ///STILL UNSECURE
@@ -949,6 +964,18 @@ int handle_client_authentication(){
     free(username);
     return get_user_id_by_username(client_username);
 }
+
+
+int send_secure(){
+    return 0;
+}
+
+
+int recv_secure(){
+    return 0;
+}
+
+
 
 
 

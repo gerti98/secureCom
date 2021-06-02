@@ -760,15 +760,15 @@ cout << " DBG - Preparing M3 " << endl;
     uint32_t n_eph_dh_pubKey_len=htonl(eph_dh_pubKey_len);
     uint32_t n_client_sign_len=htonl(client_sign_len);
     msg_bytes_written = 0;
-    memcpy(msg_to_send_M3, &n_eph_dh_pubKey_len, sizeof(uint32_t));
+    memcpy(msg_to_send_M3 + msg_bytes_written, &n_eph_dh_pubKey_len, sizeof(uint32_t));
     msg_bytes_written += sizeof(uint32_t);
-    memcpy(msg_to_send_M3, eph_dh_pubKey, eph_dh_pubKey_len);
+    memcpy(msg_to_send_M3+ msg_bytes_written, eph_dh_pubKey, eph_dh_pubKey_len);
     cerr<<"DBG - eph pub key: "<<eph_dh_pubKey_len<<" bytes"<<endl;
     msg_bytes_written += eph_dh_pubKey_len;
-    memcpy(msg_to_send_M3, &n_client_sign_len, sizeof(uint32_t));
+    memcpy(msg_to_send_M3 + msg_bytes_written, &n_client_sign_len, sizeof(uint32_t));
     msg_bytes_written += sizeof(uint32_t);
-    memcpy(msg_to_send_M3, client_signature, client_sign_len);
-    cerr<<"DBG - signature: "<<eph_dh_pubKey_len<<" bytes"<<endl;
+    memcpy(msg_to_send_M3 + msg_bytes_written, client_signature, client_sign_len);
+    cerr<<"DBG - signature: "<<client_sign_len<<" bytes"<<endl;
     msg_bytes_written += client_sign_len;
     if(msg_bytes_written != msglen){
         cerr<<"ERR - error on copyng"<<endl;
@@ -811,7 +811,8 @@ cout << " DBG - Deriving session key " << endl;
         free(eph_dh_pubKey);
         return -1;
     }
-
+    cout << "DBG - Session key generated!" << endl;
+    BIO_dump_fp(stdout, (const char*)secret, secret_len);
     free(dh_server_pubkey);
     free(eph_dh_pubKey);
     free(secret);
