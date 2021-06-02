@@ -39,6 +39,7 @@
 #define STOP_CHAT       0x09
 #define CHAT_RESPONSE   0x0A
 #define AUTH            0x0B
+#define USRID           0x0C
 
 /*
  *  SIZE COSTANT
@@ -69,6 +70,7 @@
 #define RELAY_CONTROL_TIME 3 //seconds
 #define RELAY_MSG_SIZE 100
 #define NONCE_SIZE 2
+#define AAD_STD_SIZE 8
 
 /**************************
 *   CRYPTO CONSTANTS

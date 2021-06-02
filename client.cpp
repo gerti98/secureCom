@@ -663,11 +663,13 @@ cout << " DBG - Check the authenticity of the msg " << endl;
         free(signed_msg);
         free(signature);
         free(server_cert);
-        fclose(CA_cert_file);
-        fclose(CA_crl_file);
+        // Files are closed in verify_sign_cert
+        //fclose(CA_cert_file);
+        //fclose(CA_crl_file);
         return -1;
     }
     // Close and free the unnecessary stuff
+    // Files are closed in verify_sign_cert
     //fclose(CA_cert_file);
     //fclose(CA_crl_file);
     free(signature);
@@ -741,7 +743,7 @@ cout << " DBG - Preparing M3 " << endl;
     }
     cerr<<"DBG - sign done"<<endl;
     free(server_nonce);
-    //fclose(privKey_file);
+    //fclose(privKey_file); closed in sign_document
     free(msg_to_sign);
    
     // Building the message to send
@@ -828,21 +830,112 @@ cout << " DBG - Deriving session key " << endl;
     /************************************************************
      * End of Authentication 
      ************************************************************/
-    // At the end of the authentication the server will send the id that he is assigned to me
-cout << " DBG - Retrieving user id " << endl;
-    // TO DO
-    int loggedUser_id_net_ct;
-    ret = recv(sock_id, (void*)&loggedUser_id_net_ct, sizeof(int), 0);
-    if(ret <= 0)
+    
+    // If we are arrived here the authentication is done succesfully
+    return 0;
+}
+
+
+int retrieve_my_userID(int socket)
+{
+    cout << " DBG - Retrieving user id " << endl;
+    unsigned char* aad = (unsigned char*)malloc(AAD_STD_SIZE);
+    if(!aad){
+        cerr << " Error in malloc for aad " << endl; 
         return -1;
+    }
+    unsigned char* iv = (unsigned char*)malloc(IV_DEFAULT);
+    if(!iv){
+        cerr << " Error in malloc for iv " << endl; 
+        free(aad);
+        return -1;
+    }
+    unsigned char* tag = (unsigned char*)malloc(TAG_DEFAULT);
+    if(!tag){
+        cerr << " Error in malloc for tag " << endl; 
+        free(aad);
+        free(iv);
+        return -1;
+    }
+    uint32_t ct_len;
+    unsigned char* ciphertext = NULL;
+    unsigned char* plaintext = NULL;
+    uint32_t pt_len;
+    int ret;
+
+    // Receive AAD
+    ret = recv(sock_id, (void*)aad, AAD_STD_SIZE, 0);
+    if(ret <= 0){
+        cerr << " Error in AAD reception " << endl;
+        free(aad);
+        free(tag);
+        free(iv);
+        return -1;
+    }
+
+    // Open AAD
+    memcpy((void*)&ct_len, aad, sizeof(uint32_t));
+    memcpy(iv, aad+sizeof(uint32_t), IV_DEFAULT);
+    memcpy(tag, aad+sizeof(uint32_t)+IV_DEFAULT, TAG_DEFAULT);
+
+    // Receive ciphertext
+    cout << " DBG - ct_len before ntohl is " << ct_len << endl;
+    ct_len = ntohl(ct_len);
+    cout << " DBG - ct_len real is " << ct_len << endl;
+
+    ciphertext = (unsigned char*)malloc(ct_len);
+    if(!ciphertext){
+        cerr << " Error in malloc for ciphertext " << endl;
+        free(aad);
+        free(tag);
+        free(iv);
+        return -1;
+    }
+    ret = recv(sock_id, (void*)ciphertext, ct_len, 0);
+    if(ret <= 0){
+        cerr << " Error in AAD reception " << endl;
+        free(ciphertext);
+        free(aad);
+        free(tag);
+        free(iv);
+        return -1;
+    }
+
+    // Decryption
+    pt_len = auth_enc_decrypt(ciphertext, ct_len, aad, AAD_STD_SIZE, session_key_clientToServer, tag, iv, &plaintext);
+    if(pt_len == 0){
+        cerr << " Error during decryption " << endl;
+        free(ciphertext);
+        free(plaintext);
+        free(aad);
+        free(tag);
+        free(iv);
+        return -1;
+    }
+
+    free(ciphertext);
+    free(aad);
+    free(tag);
+    free(iv);
+
+    uint8_t opcode_rec;
+    memcpy(&opcode_rec, plaintext, sizeof(uint8_t));
+
+    cout << " opcode received is " << (uint16_t)opcode_rec << endl;
+    if(opcode_rec!=USRID){
+        cerr << " Error: wrong opcode " << endl;
+        free(plaintext);
+        return -1;
+    }
+
+    int loggedUser_id_net_ct;
+    memcpy(&loggedUser_id_net_ct, plaintext+sizeof(uint8_t), sizeof(uint32_t));
     
     loggedUser_id = ntohl(loggedUser_id_net_ct);
     cout << " I'm the user with ID " << loggedUser_id << endl;  
-    
-
-    // For now let's assume that the authentication has been succesfully executed
     return 0;
 }
+
 
 /**
  * @brief Handler that handles the SIG_ALARM, this represents the fact that every REQUEST_CONTROL_TIME the client must control for chat request
