@@ -1089,6 +1089,8 @@ int main()
     //char send_buffer[1024];                 //buffer for sending replies
     pid_t pid;                              
     string password_for_keys;
+
+    // WE MAY WANT TO DISABLE ECHO
     cout << "Enter the password that will be used for reading the keys: ";
     cin >> password_for_keys;
     privkey_password=(char*)password_for_keys.c_str();
