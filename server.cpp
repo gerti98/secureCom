@@ -682,7 +682,7 @@ int handle_client_authentication(){
     /*************************************************************
      * M2 - Send R2,pubkey_eph,signature,certificate
      *************************************************************/
-    uchar* R2 = (uchar*)malloc(NUANCE_DEFAULT);
+    uchar* R2 = (uchar*)malloc(NONCE_SIZE);
     if(!R2){
         errorHandler(MALLOC_ERR);
         free(R1);
@@ -706,7 +706,7 @@ int handle_client_authentication(){
     BIO_dump_fp(stdout, (const char*)eph_pubkey_s, eph_pubkey_s_len);
 
     //Generate nuance R2
-    ret = random_generate(NUANCE_DEFAULT, R2);
+    ret = random_generate(NONCE_SIZE, R2);
     if(ret != 1){
         log("Error on random_generate");
         free(R2);
@@ -720,7 +720,7 @@ int handle_client_authentication(){
     BIO_dump_fp(stdout, (const char*)R2, NONCE_SIZE);
 
     //Get certificate of Server
-    FILE* cert_file = fopen("certification/SecureCom_cert(TM).pem", "rb"); //TODO: Maybe it's wrong this file
+    FILE* cert_file = fopen("certification/SecureCom_cert.pem", "rb"); //TODO: Maybe it's wrong this file
     if(!cert_file){
         log("Error on opening cert file");
         free(R2);
@@ -744,7 +744,7 @@ int handle_client_authentication(){
     log("auth (3) certificate: ");
     BIO_dump_fp(stdout, (const char*)certificate_ser, certificate_len);
 
-    uint M2_to_sign_length = NONCE_SIZE*2 + eph_pubkey_s_len, M2_signed_length;
+    uint M2_to_sign_length = (NONCE_SIZE*2) + eph_pubkey_s_len, M2_signed_length;
     uchar* M2_signed;
     uchar* M2_to_sign = (uchar*)malloc(M2_to_sign_length);
     if(!M2_to_sign){
@@ -756,12 +756,12 @@ int handle_client_authentication(){
         exit(1);
     }
 
-    memcpy(M2_to_sign, &R1, sizeof(uint16_t));
-    memcpy((void*)(M2_to_sign + 2), &R2, sizeof(uint16_t));
-    memcpy((void*)(M2_to_sign + 4), eph_pubkey_s, eph_pubkey_s_len);
+    memcpy(M2_to_sign, R1, NONCE_SIZE);
+    memcpy((void*)(M2_to_sign + NONCE_SIZE), R2, NONCE_SIZE);
+    memcpy((void*)(M2_to_sign + (2*NONCE_SIZE)), eph_pubkey_s, eph_pubkey_s_len);
     log("auth (4) M2_to_sign: ");
     BIO_dump_fp(stdout, (const char*)M2_to_sign, M2_to_sign_length);
-    FILE* server_key = fopen("certification/SecureCom_key.pem", "rb"); //TODO: Maybe it's wrong this file
+    FILE* server_key = fopen("certification/SecureCom_prvkey.pem", "rb"); //TODO: Maybe it's wrong this file
     if(!server_key){
         log("Error on opening key file");
         free(R2);
@@ -845,17 +845,18 @@ int handle_client_authentication(){
         free(R2);
         exit(1);
     }
-    eph_pubkey_c_len = ntohl(eph_pubkey_c_len);
+    //eph_pubkey_c_len = ntohl(eph_pubkey_c_len);
+    eph_pubkey_c_len =178;
     log("M3 auth (1) pubkey_c_len: "+ to_string(eph_pubkey_c_len));
 
     uchar* eph_pubkey_c = (uchar*)malloc(eph_pubkey_c_len);
-    if(!eph_pubkey_c || ret != sizeof(uint32_t)){
+    if(!eph_pubkey_c ){
         errorHandler(MALLOC_ERR);
         free(R2);
         exit(1);
     }
 
-    ret = recv(comm_socket_id, eph_pubkey_c, PUBKEY_DEFAULT, 0);
+    ret = recv(comm_socket_id, eph_pubkey_c, eph_pubkey_c_len, 0);
     if(ret <= 0){
         errorHandler(REC_ERR);
         free(R2);
@@ -863,6 +864,9 @@ int handle_client_authentication(){
         exit(1);
     }
     log("M3 auth (2) pubkey_c:");
+    int s;
+    cin>>s;
+
     BIO_dump_fp(stdout, (const char*)eph_pubkey_c, eph_pubkey_c_len);
 
     uint32_t m3_signature_len;
@@ -874,6 +878,7 @@ int handle_client_authentication(){
         exit(1);
     }
     m3_signature_len = ntohl(m3_signature_len);
+    m3_signature_len = 178;
     log("M3 auth (3) m3_signature_len: "+ to_string(m3_signature_len));
 
     //TODO: need to know certificate length for M3
@@ -896,7 +901,7 @@ int handle_client_authentication(){
     log("auth (4) M3 signed:");
     BIO_dump_fp(stdout, (const char*)M3_signed, m3_signature_len);
 
-    string pubkey_of_client_path = "certificate/" + client_username + "_pubkey.pem";
+    string pubkey_of_client_path = "certification/" + client_username + "_pubkey.pem";
     FILE* pubkey_of_client = fopen(pubkey_of_client_path.c_str(), "rb");
     if(!pubkey_of_client){
         log("Unable to open pubkey of client");
@@ -906,7 +911,7 @@ int handle_client_authentication(){
         exit(1);
     }
 
-    uint m3_document_size = eph_pubkey_c_len + NUANCE_DEFAULT;
+    uint m3_document_size = eph_pubkey_c_len + NONCE_SIZE;
     uchar* m3_document = (uchar*)malloc(m3_document_size);
     if(!m3_document){
         errorHandler(MALLOC_ERR);
@@ -916,6 +921,8 @@ int handle_client_authentication(){
         exit(1);
     }
 
+    memcpy(m3_document, eph_pubkey_c,eph_pubkey_c_len );
+    memcpy(m3_document+eph_pubkey_c_len, R2, NONCE_SIZE);
     verify_sign_pubkey(M3_signed, m3_signature_len,m3_document,m3_document_size, pubkey_of_client);
     uchar* session_key; //Already hashed by the derive secret
     derive_secret((void*)eph_privkey_s, eph_pubkey_c, eph_pubkey_c_len, &session_key);

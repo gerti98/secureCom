@@ -737,13 +737,13 @@ int main(int argc, char* argv[]){
 // it's possible to permfor encryption/decryption without direct calling openSSL library
 /*
 int main(int argc, char* argv[]){
-    string cacert_file_name="certification/SuperHakerCA_cert.pem";
+    string cacert_file_name="certification/TrustMe CA_cert.pem";
     FILE* cacert_file = fopen(cacert_file_name.c_str(), "r");
-    string crl_file_name="certification/SuperHakerCA_crl.pem";
+    string crl_file_name="certification/TrustMe CA_crl.pem";
     FILE* crl_file = fopen(crl_file_name.c_str(), "r");
     string cert_file_name="certification/SecureCom_cert.pem";
     FILE* cert_file = fopen(cert_file_name.c_str(), "r");
-    string pkey_file="certification/SecureCom_key.pem";
+    string pkey_file="certification/SecureCom_prvkey.pem";
     FILE* privk_file=fopen(pkey_file.c_str(), "r");
    
     uchar* certificate;
@@ -757,18 +757,20 @@ int main(int argc, char* argv[]){
         
         cert_len=serialize_certificate(cert_file, &certificate);
         
-        if(cert_len!=0 && verify_sign_cert(
-            certificate, cert_len, cacert_file, crl_file, sign, sign_len, docuemnt, doc_size)){
+        if(cert_len!=0){
+            int ret= verify_sign_cert(
+            certificate, cert_len, cacert_file, crl_file, sign, sign_len, docuemnt, doc_size);
             cout <<"ok";
+            cout << "verify_sign_cert returned " << ret << "\n";
         }
-
+        
         free(certificate);
         free(sign);
     }
     return 0;
     
 }
-*/
+/*
 /*
 int main(){
 
