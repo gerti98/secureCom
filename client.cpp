@@ -462,6 +462,19 @@ int retrieve_my_userID(int socket)
     cout << " tag " << endl;
     BIO_dump_fp(stdout, (const char*)tag, TAG_DEFAULT);
 
+    unsigned char* aad = (unsigned char*)malloc(sizeof(uint32_t));
+    if(!aad){
+        cerr << " Error in aad malloc " << endl;
+        free(ciphertext);
+        free(header);
+        free(tag);
+        free(iv);
+        return -1;
+    }
+    memcpy(aad, header, sizeof(uint32_t));
+    cout << " AAD : " << endl;
+    BIO_dump_fp(stdout, (const char*)aad, sizeof(uint32_t));
+
     // Receive ciphertext
     cout << " DBG - ct_len before ntohl is " << ct_len << endl;
     ct_len = ntohl(ct_len);
@@ -485,19 +498,9 @@ int retrieve_my_userID(int socket)
         return -1;
     }
 
-    unsigned char* aad = (unsigned char*)malloc(sizeof(uint32_t));
-    if(!aad){
-        cerr << " Error in aad malloc " << endl;
-        free(ciphertext);
-        free(header);
-        free(tag);
-        free(iv);
-        return -1;
-    }
-    memcpy(aad, header, sizeof(uint32_t));
-    cout << " AAD : " << endl;
-    BIO_dump_fp(stdout, (const char*)aad, sizeof(uint32_t));
-
+ 
+    cout << " ciphertext is: " << endl;
+    BIO_dump_fp(stdout, (const char*)ciphertext, ct_len);
     // Decryption
     pt_len = auth_enc_decrypt(ciphertext, ct_len, aad, sizeof(uint32_t), session_key_clientToServer, tag, iv, &plaintext);
     if(pt_len == 0 || pt_len!=ct_len){

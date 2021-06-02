@@ -389,6 +389,17 @@ int send_secure(int comm_socket_id, uchar* pt, int pt_len){
     log("Msg (authenticated and encrypted) to send, (copied " + to_string(bytes_copied) + " of " + to_string(msg_to_send_len) + "):");
     BIO_dump_fp(stdout, (const char*)msg_to_send, msg_to_send_len);
 
+    //-----------------------------------------------------------
+    // Controllo encr/decr
+    unsigned char* pt_test = NULL;
+    int pt_len_test = auth_enc_decrypt(ct, ct_len, (uchar*)&aad_ct_len_net, sizeof(uint32_t), session_key, tag, iv, &pt_test);
+    if(pt_len_test == 0){
+        log("auth_enc_decrypt failed");
+        return 0;
+    }
+    cout << " plaintext " << endl;
+    BIO_dump_fp(stdout, (const char*)pt_test, pt_len_test);
+    //------------------------------------------------------
     ret = send(comm_socket_id, msg_to_send, msg_to_send_len, 0);
     if(ret <= 0 || ret != msg_to_send_len){
         errorHandler(SEND_ERR);
