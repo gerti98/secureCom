@@ -70,7 +70,6 @@
 #define RELAY_CONTROL_TIME 3 //seconds
 #define RELAY_MSG_SIZE 100
 #define NONCE_SIZE 2
-#define AAD_STD_SIZE 8
 
 /**************************
 *   CRYPTO CONSTANTS

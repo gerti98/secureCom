@@ -360,27 +360,29 @@ int send_secure(int comm_socket_id, uchar* pt, int pt_len){
     uint aad_len;
     log("Plaintext to send:");
     BIO_dump_fp(stdout, (const char*)pt, pt_len);
+    uint32_t header_len = sizeof(uint32_t)+IV_DEFAULT+TAG_DEFAULT;
+
 
     int ct_len = auth_enc_encrypt(pt, pt_len, (uchar*)&aad_ct_len_net, sizeof(uint), session_key, &tag, &iv, &ct);
     if(ct_len == 0){
         log("auth_enc_encrypt failed");
         return 0;
     }
-    log("ct_len: " + to_string(ct_len));
-    
-    uint msg_to_send_len = ct_len + 7, bytes_copied = 0;
+    log("ct_len: " + to_string(ct_len)); 
+    uint msg_to_send_len = ct_len + header_len, bytes_copied = 0;
     uchar* msg_to_send = (uchar*)malloc(msg_to_send_len);
     if(!msg_to_send){
         errorHandler(MALLOC_ERR);
         return 0;
     }
 
+    cout << aad_ct_len_net << " -> " << ntohl(aad_ct_len_net) << endl;
     memcpy(msg_to_send + bytes_copied, &aad_ct_len_net, sizeof(uint));
     bytes_copied += sizeof(uint);
-    memcpy(msg_to_send + bytes_copied, iv, IV_DEFAULT/8);
-    bytes_copied += IV_DEFAULT/8;
-    memcpy(msg_to_send + bytes_copied, tag, TAG_DEFAULT/8);
-    bytes_copied += TAG_DEFAULT/8;
+    memcpy(msg_to_send + bytes_copied, iv, IV_DEFAULT);
+    bytes_copied += IV_DEFAULT;
+    memcpy(msg_to_send + bytes_copied, tag, TAG_DEFAULT);
+    bytes_copied += TAG_DEFAULT;
     memcpy(msg_to_send + bytes_copied, ct, ct_len);
     bytes_copied += sizeof(uint);
 
@@ -393,7 +395,7 @@ int send_secure(int comm_socket_id, uchar* pt, int pt_len){
         free(msg_to_send);
         return 0;
     }
-
+    cout << " DBG - message sent " << endl;
     free(msg_to_send);
     return 1;
 }
@@ -737,14 +739,14 @@ int handle_client_authentication(string pwd_for_keys){
 
 
 
-    ret = send(comm_socket_id, (void*)&client_user_id_net, sizeof(int),0);
+    /*ret = send(comm_socket_id, (void*)&client_user_id_net, sizeof(int),0);
     if(ret < sizeof(int)){
         errorHandler(SEND_ERR);
     }
     log("Sent to client: ");
-    BIO_dump_fp(stdout, (const char*)&client_user_id, ret);
+    BIO_dump_fp(stdout, (const char*)&client_user_id, ret);*/
     
-    /* Prova per send_secure
+    //Prova per send_secure
     
     ret = send_secure(comm_socket_id, (uchar *)&client_user_id_net, sizeof(int));
     if(ret == 0){
@@ -752,7 +754,6 @@ int handle_client_authentication(string pwd_for_keys){
         exit(1);
     }
 
-    */
 
     //Check if present in the user_datastore
     free(username);

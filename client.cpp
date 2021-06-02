@@ -406,6 +406,138 @@ int receive_message(int sock_id, string& msg)
     return 0;
 }
 
+int retrieve_my_userID(int socket)
+{
+    cout << " DBG - Retrieving user id " << endl;
+    uint32_t header_len = sizeof(uint32_t)+IV_DEFAULT+TAG_DEFAULT;
+    cout << " DBG - header_len: " << header_len << endl;
+    unsigned char* header = (unsigned char*)malloc(header_len);
+    if(!header){
+        cerr << " Error in malloc for header " << endl; 
+        return -1;
+    }
+    unsigned char* iv = (unsigned char*)malloc(IV_DEFAULT);
+    if(!iv){
+        cerr << " Error in malloc for iv " << endl; 
+        free(header);
+        return -1;
+    }
+    unsigned char* tag = (unsigned char*)malloc(TAG_DEFAULT);
+    if(!tag){
+        cerr << " Error in malloc for tag " << endl; 
+        free(header);
+        free(iv);
+        return -1;
+    }
+    uint32_t ct_len;
+    unsigned char* ciphertext = NULL;
+    unsigned char* plaintext = NULL;
+    uint32_t pt_len;
+    int ret;
+
+    // Receive Header
+    //cout << " DBG - Before recv " << endl;
+    //BIO_dump_fp(stdout, (const char*)header, header_len);
+
+    ret = recv(sock_id, (void*)header, header_len, 0);
+    if(ret <= 0 || ret != header_len){
+        cerr << " Error in header reception " << ret << endl;
+        BIO_dump_fp(stdout, (const char*)header, header_len);
+        free(header);
+        free(tag);
+        free(iv);
+        return -1;
+    }
+    BIO_dump_fp(stdout, (const char*)header, header_len);
+    // Open header
+    memcpy((void*)&ct_len, header, sizeof(uint32_t));
+    cout << " ct_len :" << endl;
+    BIO_dump_fp(stdout, (const char*)&ct_len, sizeof(uint32_t));
+
+    memcpy(iv, header+sizeof(uint32_t), IV_DEFAULT);
+    cout << " iv :" << endl;
+    BIO_dump_fp(stdout, (const char*)iv, IV_DEFAULT);
+
+    memcpy(tag, header+sizeof(uint32_t)+IV_DEFAULT, TAG_DEFAULT);
+    cout << " tag " << endl;
+    BIO_dump_fp(stdout, (const char*)tag, TAG_DEFAULT);
+
+    // Receive ciphertext
+    cout << " DBG - ct_len before ntohl is " << ct_len << endl;
+    ct_len = ntohl(ct_len);
+    cout << " DBG - ct_len real is " << ct_len << endl;
+
+    ciphertext = (unsigned char*)malloc(ct_len);
+    if(!ciphertext){
+        cerr << " Error in malloc for ciphertext " << endl;
+        free(header);
+        free(tag);
+        free(iv);
+        return -1;
+    }
+    ret = recv(sock_id, (void*)ciphertext, ct_len, 0);
+    if(ret <= 0){
+        cerr << " Error in AAD reception " << endl;
+        free(ciphertext);
+        free(header);
+        free(tag);
+        free(iv);
+        return -1;
+    }
+
+    unsigned char* aad = (unsigned char*)malloc(sizeof(uint32_t));
+    if(!aad){
+        cerr << " Error in aad malloc " << endl;
+        free(ciphertext);
+        free(header);
+        free(tag);
+        free(iv);
+        return -1;
+    }
+    memcpy(aad, header, sizeof(uint32_t));
+    cout << " AAD : " << endl;
+    BIO_dump_fp(stdout, (const char*)aad, sizeof(uint32_t));
+
+    // Decryption
+    pt_len = auth_enc_decrypt(ciphertext, ct_len, aad, sizeof(uint32_t), session_key_clientToServer, tag, iv, &plaintext);
+    if(pt_len == 0 || pt_len!=ct_len){
+        cerr << " Error during decryption " << endl;
+        free(ciphertext);
+        free(plaintext);
+        free(header);
+        free(tag);
+        free(iv);
+        return -1;
+    }
+    cout << " ciphertext is: " << endl;
+    BIO_dump_fp(stdout, (const char*)ciphertext, ct_len);
+    cout << " plaintext is " << endl;
+    BIO_dump_fp(stdout, (const char*)plaintext, pt_len);
+    free(ciphertext);
+    free(header);
+    free(tag);
+    free(iv);
+
+    /*uint8_t opcode_rec;
+    memcpy(&opcode_rec, plaintext, sizeof(uint8_t));
+
+    cout << " opcode received is " << (uint16_t)opcode_rec << endl;
+    if(opcode_rec!=USRID){
+        cerr << " Error: wrong opcode " << endl;
+        free(plaintext);
+        return -1;
+    }*/
+
+    int loggedUser_id_net;
+    //BIO_dump_fp(stdout, (const char*)&loggedUser_id_net, sizeof(uint32_t));
+    memcpy(&loggedUser_id_net, plaintext, sizeof(uint32_t));
+    //BIO_dump_fp(stdout, (const char*)&loggedUser_id_net, sizeof(uint32_t));
+    
+    loggedUser_id = ntohl(loggedUser_id_net);
+    //BIO_dump_fp(stdout, (const char*)&loggedUser_id, sizeof(uint32_t));
+    cout << " I'm the user with ID " << loggedUser_id  << " aka " << loggedUser_id_net << endl;  
+    return 0;
+}
 
 /**
  * @brief It performs the authentication procedure with the server
@@ -825,114 +957,18 @@ cout << " DBG - Deriving session key " << endl;
     if(keylen==0){
         free(server_cert);
         free(session_key_clientToServer);
+        return -1;
     }
     
     /************************************************************
      * End of Authentication 
      ************************************************************/
-    
+    ret = retrieve_my_userID(sock_id);
+    if(ret!=0){
+        cerr << " Error during the retrieving of the user id " << endl;
+        return -1;
+    }
     // If we are arrived here the authentication is done succesfully
-    return 0;
-}
-
-
-int retrieve_my_userID(int socket)
-{
-    cout << " DBG - Retrieving user id " << endl;
-    unsigned char* aad = (unsigned char*)malloc(AAD_STD_SIZE);
-    if(!aad){
-        cerr << " Error in malloc for aad " << endl; 
-        return -1;
-    }
-    unsigned char* iv = (unsigned char*)malloc(IV_DEFAULT);
-    if(!iv){
-        cerr << " Error in malloc for iv " << endl; 
-        free(aad);
-        return -1;
-    }
-    unsigned char* tag = (unsigned char*)malloc(TAG_DEFAULT);
-    if(!tag){
-        cerr << " Error in malloc for tag " << endl; 
-        free(aad);
-        free(iv);
-        return -1;
-    }
-    uint32_t ct_len;
-    unsigned char* ciphertext = NULL;
-    unsigned char* plaintext = NULL;
-    uint32_t pt_len;
-    int ret;
-
-    // Receive AAD
-    ret = recv(sock_id, (void*)aad, AAD_STD_SIZE, 0);
-    if(ret <= 0){
-        cerr << " Error in AAD reception " << endl;
-        free(aad);
-        free(tag);
-        free(iv);
-        return -1;
-    }
-
-    // Open AAD
-    memcpy((void*)&ct_len, aad, sizeof(uint32_t));
-    memcpy(iv, aad+sizeof(uint32_t), IV_DEFAULT);
-    memcpy(tag, aad+sizeof(uint32_t)+IV_DEFAULT, TAG_DEFAULT);
-
-    // Receive ciphertext
-    cout << " DBG - ct_len before ntohl is " << ct_len << endl;
-    ct_len = ntohl(ct_len);
-    cout << " DBG - ct_len real is " << ct_len << endl;
-
-    ciphertext = (unsigned char*)malloc(ct_len);
-    if(!ciphertext){
-        cerr << " Error in malloc for ciphertext " << endl;
-        free(aad);
-        free(tag);
-        free(iv);
-        return -1;
-    }
-    ret = recv(sock_id, (void*)ciphertext, ct_len, 0);
-    if(ret <= 0){
-        cerr << " Error in AAD reception " << endl;
-        free(ciphertext);
-        free(aad);
-        free(tag);
-        free(iv);
-        return -1;
-    }
-
-    // Decryption
-    pt_len = auth_enc_decrypt(ciphertext, ct_len, aad, AAD_STD_SIZE, session_key_clientToServer, tag, iv, &plaintext);
-    if(pt_len == 0){
-        cerr << " Error during decryption " << endl;
-        free(ciphertext);
-        free(plaintext);
-        free(aad);
-        free(tag);
-        free(iv);
-        return -1;
-    }
-
-    free(ciphertext);
-    free(aad);
-    free(tag);
-    free(iv);
-
-    uint8_t opcode_rec;
-    memcpy(&opcode_rec, plaintext, sizeof(uint8_t));
-
-    cout << " opcode received is " << (uint16_t)opcode_rec << endl;
-    if(opcode_rec!=USRID){
-        cerr << " Error: wrong opcode " << endl;
-        free(plaintext);
-        return -1;
-    }
-
-    int loggedUser_id_net_ct;
-    memcpy(&loggedUser_id_net_ct, plaintext+sizeof(uint8_t), sizeof(uint32_t));
-    
-    loggedUser_id = ntohl(loggedUser_id_net_ct);
-    cout << " I'm the user with ID " << loggedUser_id << endl;  
     return 0;
 }
 
