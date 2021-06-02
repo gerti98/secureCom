@@ -410,7 +410,6 @@ int serialize_certificate(FILE* cert_file, uchar** certificate){
     *certificate=nullptr;
     if(!cert_file){ cerr << "Error: cannot open certificate file (missing?)\n"; return 0; }
     X509* cert = PEM_read_X509(cert_file, NULL, NULL, NULL);
-    fclose(cert_file);
     if(!cert){ cerr << "Error: PEM_read_X509 returned NULL\n"; return 0;  }
     int ret=i2d_X509(cert, certificate);
     X509_free(cert);
@@ -528,13 +527,11 @@ int verify_sign_cert(const uchar* certificate, const uint cert_lenght,  FILE* co
     // load CA certificate (self signed)
     if(!CAcertificate){ cerr << "Error: cannot open ca certificate file (missing?)\n"; return 0; }
     X509* cacert = PEM_read_X509(CAcertificate, NULL, NULL, NULL);
-    fclose(CAcertificate);
     if(!cacert){ cerr << "Error: PEM_read_X509 returned NULL\n"; return 0; }
 
     // load CA ctrl for revocation list
     if(!CAcrl){ cerr << "Error: cannot open ca ctrl file (missing?)\n"; return 0; }
     X509_CRL* crl = PEM_read_X509_CRL(CAcrl, NULL, NULL, NULL);
-    fclose(CAcrl);
     if(!crl){ cerr << "Error: PEM_read_X509_CRL returned NULL\n"; return 0; }
   
 
@@ -554,10 +551,9 @@ int verify_sign_cert(const uchar* certificate, const uint cert_lenght,  FILE* co
     return ret;
 }
 
-int sign_document( const uchar* document, uint doc_lenght, FILE* const priv_key,uchar** signature, uint* sign_lenght){
+int sign_document( const uchar* document, uint doc_lenght, FILE* const priv_key, char* const password, uchar** signature, uint* sign_lenght){
     if(!priv_key){ cerr << "Error: cannot open private key file  (missing?)\n"; return 0; }
-    EVP_PKEY* prvkey = PEM_read_PrivateKey(priv_key, NULL, NULL, NULL);
-    fclose(priv_key);
+    EVP_PKEY* prvkey = PEM_read_PrivateKey(priv_key, NULL, NULL, password);
     if(!prvkey){ cerr << "Error: PEM_read_PrivateKey returned NULL\n"; return 0; }
     if(!document || doc_lenght==0) { cerr << "Error: no document \n"; EVP_PKEY_free(prvkey);return 0; }
 

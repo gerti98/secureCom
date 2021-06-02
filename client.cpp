@@ -798,15 +798,13 @@ cout << " DBG - Check the authenticity of the msg " << endl;
         free(signed_msg);
         free(signature);
         free(server_cert);
-        // Files are closed in verify_sign_cert
-        //fclose(CA_cert_file);
-        //fclose(CA_crl_file);
+        fclose(CA_cert_file);
+        fclose(CA_crl_file);
         return -1;
     }
     // Close and free the unnecessary stuff
-    // Files are closed in verify_sign_cert
-    //fclose(CA_cert_file);
-    //fclose(CA_crl_file);
+    fclose(CA_cert_file);
+    fclose(CA_crl_file);
     free(signature);
     free(signed_msg);
     free(nonce);
@@ -865,7 +863,7 @@ cout << " DBG - Preparing M3 " << endl;
         free(eph_dh_pubKey);
         return -1;
     }
-    ret = sign_document(msg_to_sign, msg_to_sign_len, privKey_file, &client_signature, &client_sign_len);
+    ret = sign_document(msg_to_sign, msg_to_sign_len, privKey_file,NULL, &client_signature, &client_sign_len);
     if(ret!=1){
         cerr<<"unable to sign"<<endl;
         free(server_nonce);
@@ -874,13 +872,15 @@ cout << " DBG - Preparing M3 " << endl;
         free(msg_to_sign);
         free(eph_dh_privKey);
         free(eph_dh_pubKey);
+        fclose(privKey_file);
         return -1;
     }
+    
     cerr<<"DBG - sign done"<<endl;
     free(server_nonce);
-    //fclose(privKey_file); closed in sign_document
     free(msg_to_sign);
-   
+    fclose(privKey_file);
+
     // Building the message to send
     uint32_t msglen = sizeof(uint32_t)+eph_dh_pubKey_len+sizeof(uint32_t)+client_sign_len;
     unsigned char* msg_to_send_M3 = (unsigned char*)malloc(msglen);

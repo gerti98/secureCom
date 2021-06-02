@@ -29,7 +29,7 @@ using uchar=unsigned char;
 typedef void (*sighandler_t)(int);
 
 
-
+char* privkey_password;
 
 /*
 * socket_id: if equal to -1 the user is not connected to the service
@@ -556,6 +556,7 @@ int handle_client_authentication(string pwd_for_keys){
         free(R1);
         free(eph_privkey_s);
         free(eph_pubkey_s);
+        fclose(cert_file);
         exit(1);
     }
 
@@ -572,10 +573,11 @@ int handle_client_authentication(string pwd_for_keys){
         free(M2_to_sign);
         free(eph_privkey_s);
         free(eph_pubkey_s);
+        fclose(cert_file);
         exit(1);
     }
 
-    ret = sign_document(M2_to_sign, M2_to_sign_length, server_key,&M2_signed, &M2_signed_length);
+    ret = sign_document(M2_to_sign, M2_to_sign_length, server_key,privkey_password,&M2_signed, &M2_signed_length);
     if(ret != 1){
         log("Error on signing part on M2");
         free(R2);
@@ -583,9 +585,10 @@ int handle_client_authentication(string pwd_for_keys){
         free(M2_to_sign);
         free(eph_privkey_s);
         free(eph_pubkey_s);
+        fclose(cert_file);
+        fclose(server_key);
         exit(1);
     }
-
     //Send M2 part by part
     
     uint M2_size = NONCE_SIZE + 3*sizeof(uint) + eph_pubkey_s_len + M2_signed_length + certificate_len;
@@ -717,6 +720,7 @@ int handle_client_authentication(string pwd_for_keys){
         free(eph_pubkey_c);
         free(M3_signed);
         exit(1);
+        fclose(pubkey_of_client);
     }
 
     memcpy(m3_document, eph_pubkey_c,eph_pubkey_c_len );
@@ -727,23 +731,33 @@ int handle_client_authentication(string pwd_for_keys){
         log("Failed sign verification on M3");
         free(eph_pubkey_c);
         free(M3_signed);
+        fclose(pubkey_of_client);
         exit(1);
     }
-
+    fclose(pubkey_of_client);
+    uchar* shared_seceret;
+    uint shared_seceret_len;
     log("auth (6) Creating session key");
-    session_key_len = derive_secret(eph_privkey_s, eph_pubkey_c, eph_pubkey_c_len, &session_key);
-    if(session_key_len == 0){
+    shared_seceret_len = derive_secret(eph_privkey_s, eph_pubkey_c, eph_pubkey_c_len, &shared_seceret);
+    if(shared_seceret_len == 0){
         log("Failed derive secret");
         free(eph_pubkey_c);
         free(M3_signed);
         exit(1);    
     }
-
+    session_key_len=default_digest(shared_seceret, shared_seceret_len, &session_key);
+    if(session_key_len == 0){
+        log("Failed digest computation of the secret");
+        free(eph_pubkey_c);
+        free(M3_signed);
+        free(shared_seceret);
+        exit(1);    
+    }
     log("Session key generated!");
     BIO_dump_fp(stdout, (const char*) session_key, session_key_len);
     free(M3_signed);
-
-
+    free(shared_seceret);
+    free(eph_pubkey_c);
     //Send user id of the client 
     int client_user_id = get_user_id_by_username(client_username);
     int client_user_id_net = htonl(client_user_id);
@@ -1077,6 +1091,7 @@ int main()
     string password_for_keys;
     cout << "Enter the password that will be used for reading the keys: ";
     cin >> password_for_keys;
+    privkey_password=(char*)password_for_keys.c_str();
 
     //Preparation of ip address struct
     memset(&srv_addr, 0, sizeof(srv_addr));

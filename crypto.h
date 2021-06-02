@@ -119,11 +119,12 @@ int verify_sign_cert(const uchar* certificate, const uint cert_lenght,  FILE* co
  * @param document innput
  * @param doc_lenght input
  * @param priv_key input private key file
+ * @param password password for private_key file, if NULL and needed it will be asked by terminal input
  * @param signature output 
  * @param sign_lenght output
  * @return 1 if successful, 0 otherwise 
  */
-int sign_document( const uchar* document, uint doc_lenght, FILE* const priv_key,uchar** signature, uint* sign_lenght);
+int sign_document( const uchar* document, uint doc_lenght, FILE* const priv_key,char* const password,uchar** signature, uint* sign_lenght);
 
 /**
  * @brief generate a random sequence 
