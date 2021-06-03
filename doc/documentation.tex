@@ -187,51 +187,11 @@ my an attacker. The session is automatically closed when a message with number \
 Clients mantains two counter for the communication with the server:  one for the next message to send and another for
 the next message to receive; the same thing is done for the communication with another client (to prevent the server to 
 reply a message); also the server has to implement this behaveour in sessions with clients.
-\chapter{Messages Format}
 
-\section{Handshake}
-\subsection*{Client Server Handshake}
-\begin{figure}[H]
-	\centering
-	\includegraphics[scale=0.19]{img/AuthClientServer_messageFormat.png}
-	\caption{Client Server Handshake Message Format}
-	\label {img: FormatClientServer}
-\end{figure}
-\subsection*{Client Client Handshake}
-\begin{figure}[H]
-	\centering
-	\includegraphics[scale=0.22]{img/AuthClientClient_messageFormat.png}
-	\caption{Client Client Handshake Message Format}
-	\label {img: FormatClientClient}
-\end{figure}
-\newpage
-\section{Commands}
-\subsection*{Client Online List Request and Answer }
-\begin{figure}[H]
-	\centering
-	\includegraphics[scale=0.25]{img/ClientOnline_messageFormat.png}
-	\caption{Client Online Message Format}
-	\label {img: FormatClientOnline}
-\end{figure}
+\chapter{Implemetation}
+\section{Client}
 
-\subsection*{Chat Request and Answers}
-\begin{figure}[H]
-	\centering
-	\includegraphics[scale=0.28]{img/ChatRequest_messageFormat.png}
-	\caption{Chat Request Message Format}
-	\label {img: FormatChatRequest}
-\end{figure}
-\newpage
-
-\section{Chat}
-\begin{figure}[H]
-	\centering
-	\includegraphics[scale=0.09]{img/message_relay.png}
-	\caption{Client Client Handshake Protocol Schema}
-	\label {img: MessageRelay}
-\end{figure}
-
-\section{How To Handle The Chat Request}
+\subsection{How To Handle The Chat Request}
 \noindent Let's start from the simple case in which a client wants to chat with another client and makes a request to the server: 
 \begin{itemize}
 	\item The standard channel is used to send either the request for chat and for the server's answers.
@@ -263,6 +223,71 @@ reply a message); also the server has to implement this behaveour in sessions wi
 	\item We assume that who send the chat request is the first to send messages.
 	\item On the server side for each client two socket must be established, one for the standard channel and another one for the request channel but the process for each client is only one.
 \end{itemize}
+
+\section{Server}
+
+\chapter{Messages Format}
+
+\section{Handshake}
+\subsection*{Client Server Handshake}
+\begin{figure}[H]
+	\centering
+	\includegraphics[scale=0.28]{img/AuthClientServer_messageFormat.png}
+	\caption{Client Server Handshake Message Format}
+	\label {img: FormatClientServer}
+\end{figure}
+\subsection*{Session}
+\begin{figure}[H]
+	\centering
+	\includegraphics[scale=0.28]{img/HeaderFormat.png}
+	\caption{Client Server Header Format}
+	\label {img: FormatClientServerHeader}
+\end{figure}
+\begin{figure}[H]
+	\centering
+	\includegraphics[scale=0.28]{img/SessionFirstMessageFormat.png}
+	\caption{First message of every Session: server communicate cliet userID}
+	\label {img: FormatClientServerFirst}
+\end{figure}
+\subsection*{Client Client Handshake}
+\begin{figure}[H]
+	\centering
+	\includegraphics[scale=0.28]{img/AuthClientClient_messageFormat.png}
+	\caption{Client Client Handshake Message Format}
+	\label {img: FormatClientClient}
+\end{figure}
+
+\section{Commands}
+\subsection*{Client Online List Request and Answer }
+\begin{figure}[H]
+	\centering
+	\includegraphics[scale=0.25]{img/ClientOnline_messageFormat.png}
+	\caption{Client Online Message Format}
+	\label {img: FormatClientOnline}
+\end{figure}
+\subsection*{Other commands}
+\begin{figure}[H]
+	\centering
+	\includegraphics[scale=0.28]{img/OthersCommandsFormat.png}
+	\caption{Other commands Format}
+	\label {img: FormatOtherCommands}
+\end{figure}
+\subsection*{Chat Request and Answers}
+\begin{figure}[H]
+	\centering
+	\includegraphics[scale=0.28]{img/ChatRequest_messageFormat.png}
+	\caption{Chat Request Message Format}
+	\label {img: FormatChatRequest}
+\end{figure}
+\newpage
+
+\section{Chat}
+\begin{figure}[H]
+	\centering
+	\includegraphics[scale=0.09]{img/message_relay.png}
+	\caption{Client Client Handshake Protocol Schema}
+	\label {img: MessageRelay}
+\end{figure}
 
 
 
