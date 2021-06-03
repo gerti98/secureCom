@@ -29,7 +29,7 @@ using uchar=unsigned char;
 typedef void (*sighandler_t)(int);
 
 
-char* privkey_password;
+
 
 /*
 * socket_id: if equal to -1 the user is not connected to the service
@@ -55,6 +55,8 @@ msg_to_relay relay_msg;
 //Parameters of connection
 const char *srv_ipv4 = "127.0.0.1";
 const int srv_port = 4242;
+
+void* server_privk;
 
 uchar* session_key;
 uint32_t session_key_len;
@@ -403,11 +405,11 @@ int send_secure(int comm_socket_id, uchar* pt, int pt_len){
     ret = send(comm_socket_id, msg_to_send, msg_to_send_len, 0);
     if(ret <= 0 || ret != msg_to_send_len){
         errorHandler(SEND_ERR);
-        free(msg_to_send);
+        safe_free(msg_to_send, msg_to_send_len);
         return 0;
     }
     cout << " DBG - message sent " << endl;
-    free(msg_to_send);
+    safe_free(msg_to_send, msg_to_send_len);
     return 1;
 }
 
@@ -501,7 +503,7 @@ int handle_client_authentication(string pwd_for_keys){
         log("Error on EPH_KEY_GENERATE");
         free(R2);
         free(R1);
-        free(eph_privkey_s);
+        safe_free_privkey(eph_privkey_s);
         free(eph_pubkey_s);
         exit(1);
     }
@@ -514,7 +516,7 @@ int handle_client_authentication(string pwd_for_keys){
         log("Error on random_generate");
         free(R2);
         free(R1);
-        free(eph_privkey_s);
+        safe_free_privkey(eph_privkey_s);
         free(eph_pubkey_s);
         exit(1);
     }
@@ -528,7 +530,7 @@ int handle_client_authentication(string pwd_for_keys){
         log("Error on opening cert file");
         free(R2);
         free(R1);
-        free(eph_privkey_s);
+        safe_free_privkey(eph_privkey_s);
         free(eph_pubkey_s);
         exit(1);
     }
@@ -540,7 +542,7 @@ int handle_client_authentication(string pwd_for_keys){
         fclose(cert_file);
         free(R2);
         free(R1);
-        free(eph_privkey_s);
+        safe_free_privkey(eph_privkey_s);
         free(eph_pubkey_s);
         exit(1);
     }
@@ -554,7 +556,7 @@ int handle_client_authentication(string pwd_for_keys){
         log("Error on M2_to_sign");
         free(R2);
         free(R1);
-        free(eph_privkey_s);
+        safe_free_privkey(eph_privkey_s);
         free(eph_pubkey_s);
         fclose(cert_file);
         exit(1);
@@ -565,28 +567,18 @@ int handle_client_authentication(string pwd_for_keys){
     memcpy((void*)(M2_to_sign + (2*NONCE_SIZE)), eph_pubkey_s, eph_pubkey_s_len);
     log("auth (4) M2_to_sign: ");
     BIO_dump_fp(stdout, (const char*)M2_to_sign, M2_to_sign_length);
-    FILE* server_key = fopen("certification/SecureCom_prvkey.pem", "rb"); //TODO: Maybe it's wrong this file
-    if(!server_key){
-        log("Error on opening key file");
-        free(R2);
-        free(R1);
-        free(M2_to_sign);
-        free(eph_privkey_s);
-        free(eph_pubkey_s);
-        fclose(cert_file);
-        exit(1);
-    }
 
-    ret = sign_document(M2_to_sign, M2_to_sign_length, server_key,privkey_password,&M2_signed, &M2_signed_length);
+
+    ret = sign_document(M2_to_sign, M2_to_sign_length, server_privk,&M2_signed, &M2_signed_length);
     if(ret != 1){
         log("Error on signing part on M2");
         free(R2);
         free(R1);
         free(M2_to_sign);
-        free(eph_privkey_s);
+        safe_free_privkey(eph_privkey_s);
         free(eph_pubkey_s);
         fclose(cert_file);
-        fclose(server_key);
+   
         exit(1);
     }
     //Send M2 part by part
@@ -628,7 +620,7 @@ int handle_client_authentication(string pwd_for_keys){
         free(R2);
         free(R1);
         free(M2_to_sign);
-        free(eph_privkey_s);
+        safe_free_privkey(eph_privkey_s);
         free(eph_pubkey_s);
         exit(1);
     }
@@ -1092,8 +1084,12 @@ int main()
 
     // WE MAY WANT TO DISABLE ECHO
     cout << "Enter the password that will be used for reading the keys: ";
-    cin >> password_for_keys;
-    privkey_password=(char*)password_for_keys.c_str();
+    FILE* server_key = fopen("certification/SecureCom_prvkey.pem", "rb");
+    server_privk=read_privkey(server_key, NULL);
+    if(!server_privk){
+        cerr << "Wrong key!";
+        exit(1);
+    }
 
     //Preparation of ip address struct
     memset(&srv_addr, 0, sizeof(srv_addr));

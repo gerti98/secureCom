@@ -8,12 +8,53 @@
 #include <openssl/x509_vfy.h>
 #include "util.h"
 #include "constant.h"
+#include "crypto.h"
 #include <openssl/err.h> // for error descriptions
 
 using uchar=unsigned char;
 using namespace std;
 
+// print a key, useful for debug
+void print_key(EVP_PKEY* key){
+    BIO *bp = BIO_new_fp(stdout, BIO_NOCLOSE);
+    EVP_PKEY_print_public(bp, key, 1, NULL);
+    BIO_free(bp);
+}
 
+uint serialize_pubkey(EVP_PKEY* pubkey, uchar** pubkey_ser){
+    BIO* mbio= BIO_new(BIO_s_mem());
+    if(!mbio){ cerr << "Error: cannot initialize BIO\n"; return 0;  }
+    if(!PEM_write_bio_PUBKEY(mbio, pubkey)){
+        cerr << "Error: unable to write in BIO\n"; 
+        BIO_free(mbio);
+        return 0; }
+    uchar* tmp=NULL;
+
+    // obtain size and allocate buffer
+    int ret= BIO_get_mem_data(mbio,&tmp);
+    *pubkey_ser=(uchar*)malloc(ret);
+    if(*pubkey_ser==NULL){ 
+        cerr << "unable to allocate buffer for serialized pubkey\n"; 
+        BIO_free(mbio);
+        return 0;  
+    }
+    memcpy(*pubkey_ser, tmp, ret);
+    BIO_free(mbio);
+    return ret;
+}
+
+int deserialize_pubkey(const uchar* pubkey_ser, uint key_lenght, EVP_PKEY** pubkey){
+    BIO* mbio= BIO_new(BIO_s_mem());
+    if(!mbio){ cerr << "Error: cannot initialize BIO\n"; return 0;  }
+    if(! BIO_write(mbio, pubkey_ser, key_lenght)){
+        cerr << "Error: unable to write in BIO\n"; 
+        BIO_free(mbio);
+        return 0; }
+    *pubkey = PEM_read_bio_PUBKEY( mbio, NULL, NULL, NULL);
+    BIO_free(mbio);
+    if(*pubkey==nullptr) {cerr << "Error: bio read returned null\n"; return 0; }
+    return 1;
+}
 
 /**
  * @brief generic simmetric encryptioon function 
@@ -183,6 +224,7 @@ int aes_128_cbc_decrypt(uchar **plaintext, int ciphertext_len, uchar *key, uchar
 
 int auth_enc_encrypt( uchar *plaintext, int plaintext_len, uchar* aad, uint aad_len, uchar *key, uchar** tag,
                     uchar **iv,  uchar **ciphertext){
+    /* Create and initialize the context */
     const EVP_CIPHER *cypher=AUTH_ENCRYPT_DEFAULT;
     EVP_CIPHER_CTX *ctx;
     ctx = EVP_CIPHER_CTX_new();
@@ -197,6 +239,7 @@ int auth_enc_encrypt( uchar *plaintext, int plaintext_len, uchar* aad, uint aad_
 
     if(plaintext_len > INT_MAX -block_len) { 
         perror("Error: integer overflow (meggase too big?)\n");
+        EVP_CIPHER_CTX_free(ctx);
         return 0;
     }
 
@@ -204,16 +247,19 @@ int auth_enc_encrypt( uchar *plaintext, int plaintext_len, uchar* aad, uint aad_
     *tag=(uchar*) malloc(tag_len); 
     if(*tag==nullptr) { 
         errorHandler(MALLOC_ERR);
+        EVP_CIPHER_CTX_free(ctx);
         return 0;
     }
     *ciphertext = (uchar*) malloc(plaintext_len+block_len);
     if(*ciphertext==nullptr) { 
         errorHandler(MALLOC_ERR);
+        EVP_CIPHER_CTX_free(ctx);
         return 0;
     }
     *iv = (uchar*) malloc(iv_len);
     if(iv == nullptr) { 
         errorHandler(MALLOC_ERR);
+        EVP_CIPHER_CTX_free(ctx);
         return 0;
     }
 
@@ -221,32 +267,31 @@ int auth_enc_encrypt( uchar *plaintext, int plaintext_len, uchar* aad, uint aad_
     RAND_poll();
     if(1 != RAND_bytes(*iv, iv_len)) { 
         perror("Error: RAND_bytes failed\n");
+        EVP_CIPHER_CTX_free(ctx);
         return 0;
     }
 
-    /* Create and initialize the context */
     int len;
     int ciphertext_len;
-    if(ctx == nullptr)    { 
-        perror("Error: unallocated context\n");
-        return 0;
-    }
 
     // Encrypt init
     if(1 != EVP_EncryptInit(ctx,cypher, key, *iv)) { 
         perror("Error: encryption init failed\n");
+        
         return 0;
     }
 
     // Encrypt Update: first call
     if(1 != EVP_EncryptUpdate(ctx, NULL, &len, aad, aad_len)) { 
         perror("Error: encryption update1 failed\n");
+        EVP_CIPHER_CTX_free(ctx);
         return 0;
     }
 
     // Encrypt Update: second call
     if(1 != EVP_EncryptUpdate(ctx, *ciphertext, &len, plaintext, plaintext_len)) { 
         perror("Error: encryption update2 failed\n");
+        EVP_CIPHER_CTX_free(ctx);
         return 0;
     }
     ciphertext_len = len;
@@ -254,19 +299,19 @@ int auth_enc_encrypt( uchar *plaintext, int plaintext_len, uchar* aad, uint aad_
     //Encrypt Final. Finalize the encryption and adds the padding
     if(1 != EVP_EncryptFinal(ctx, *ciphertext + len, &len)) { 
         perror("Error: encryption final failed\n");
+        EVP_CIPHER_CTX_free(ctx);
         return 0;
     }
     ciphertext_len += len;
 
     if(1 != EVP_CIPHER_CTX_ctrl(ctx,EVP_CTRL_AEAD_GET_TAG, tag_len, *tag)){ 
         perror("Error: encryption ctrl failed\n");
+        EVP_CIPHER_CTX_free(ctx);
         return 0;
     }
-
     // deallocate contxt
     EVP_CIPHER_CTX_free(ctx);
 
-    
     return ciphertext_len;
 }
 
@@ -298,30 +343,39 @@ int auth_enc_decrypt(uchar *ciphertext, uint ciphertext_len, uchar* aad, uint aa
     ctx = EVP_CIPHER_CTX_new();
     if(ctx == nullptr)    { 
         perror("Error: unallocated context\n");
+        free(plaintext);
         return 0;
     }
 
     // Encrypt init
     if(1 != EVP_DecryptInit(ctx,cypher, key, iv)) { 
         perror("Error: decryption init failed\n");
+        free(plaintext);
+        EVP_CIPHER_CTX_cleanup(ctx);
         return 0;
     }
 
     // Encrypt Update: first call
     if(1 != EVP_DecryptUpdate(ctx, NULL, &len, aad, aad_len)) { 
         perror("Error: decryption update1 failed\n");
+        free(plaintext);
+        EVP_CIPHER_CTX_cleanup(ctx);
         return 0;
     }
 
     // Encrypt Update: second call
     if(1 != EVP_DecryptUpdate(ctx, *plaintext, &len, ciphertext, ciphertext_len)) { 
         perror("Error: decryption update2 failed\n");
+        free(plaintext);
+        EVP_CIPHER_CTX_cleanup(ctx);
         return 0;
     }
     plaintext_len = len;
 
     if(1 != EVP_CIPHER_CTX_ctrl(ctx,EVP_CTRL_AEAD_SET_TAG, tag_len, tag)){ 
         perror("Error: decryption ctrl failed\n");
+        free(plaintext);
+        EVP_CIPHER_CTX_cleanup(ctx);
         return 0;
     }
 
@@ -329,6 +383,8 @@ int auth_enc_decrypt(uchar *ciphertext, uint ciphertext_len, uchar* aad, uint aa
     int ret= EVP_DecryptFinal(ctx, *plaintext + len, &len);
     if(ret<0){ 
         perror("Error: decryption final failed \n");
+        EVP_CIPHER_CTX_cleanup(ctx);
+        free(plaintext);
         return 0;
     }
     plaintext_len += len;
@@ -374,14 +430,17 @@ uint digest(const EVP_MD* cypher, uchar* plaintext, uint plaintext_len, uchar** 
 
     if(!EVP_DigestInit(md_ctx, cypher)){
         perror("Error: encryption init failed\n");
+        free(ciphertext);
         return 0;
     }
     if(!EVP_DigestUpdate(md_ctx, plaintext, plaintext_len)){
         perror("Error: encryption update failed\n");
+        free(ciphertext);
         return 0;
     }
     if(!EVP_DigestFinal(md_ctx, *ciphertext, &outlen)){
         perror("Error: encryption final failed\n");
+        free(ciphertext);
         return 0;
     }
 
@@ -435,25 +494,26 @@ int verify_certificate(  X509* certificate,  X509*  CAcertificate,    X509_CRL* 
     ret = X509_STORE_add_cert(store, CAcertificate);
     if(ret != 1) { 
         cerr << "Error: X509_STORE_add_cert returned " << ret << "\n" << ERR_error_string(ERR_get_error(), NULL) << "\n";
-        return 0; }
+         X509_STORE_free(store); return 0; }
     ret = X509_STORE_add_crl(store, CAcrl);
     if(ret != 1) { 
         cerr << "Error: X509_STORE_add_crl returned " << ret << "\n" << ERR_error_string(ERR_get_error(), NULL) << "\n"; 
-        return 0; }
+         X509_STORE_free(store); return 0; }
     ret = X509_STORE_set_flags(store, X509_V_FLAG_CRL_CHECK);
     if(ret != 1) { 
         cerr << "Error: X509_STORE_set_flags returned " << ret << "\n" << ERR_error_string(ERR_get_error(), NULL) << "\n";
-        return 0; }
+         X509_STORE_free(store); return 0; }
 
     // verify the certificate
     X509_STORE_CTX* certvfy_ctx = X509_STORE_CTX_new();
     if(!certvfy_ctx) { 
         cerr << "Error: X509_STORE_CTX_new returned NULL\n" << ERR_error_string(ERR_get_error(), NULL) << "\n"; 
-        return 0; }
+         X509_STORE_free(store); return 0; }
     ret = X509_STORE_CTX_init(certvfy_ctx, store, certificate, NULL);
     if(ret != 1) { cerr << "Error: X509_STORE_CTX_init returned " << ret << "\n" << ERR_error_string(ERR_get_error(), NULL) << "\n"; 
-        return 0; }
+        ret=0; goto finish; }
     ret= X509_verify_cert(certvfy_ctx);
+finish:
     X509_STORE_free(store);
     X509_STORE_CTX_free(certvfy_ctx);
     return ret;
@@ -488,13 +548,10 @@ int _verify_sing_pubkey(uchar* signature, uint sign_lenght, uchar* document, uin
 int verify_sign_pubkey(uchar* signature, uint sign_lenght, uchar* document, uint doc_lenght, 
     uchar* pubkey, uint key_lenght){
         
-    // deserialiaze public key
-    BIO* mbio = BIO_new(BIO_s_mem());
-    if(!mbio){ cerr << "Error: cannot initialize BIO\n"; return 0;  }
-    if(!BIO_write(mbio, pubkey, key_lenght)){   cerr << "Error: cannot use BIO\n"; return 0; }
-    EVP_PKEY* pkey=PEM_read_bio_PUBKEY(mbio, NULL, NULL, NULL);
-    BIO_free(mbio);
-
+    EVP_PKEY* pkey;
+    if(!deserialize_pubkey(pubkey, key_lenght, &pkey)){
+        cerr << "Error: unable t odeserialize pubkey \n"; return 0;
+    }
     int ret=_verify_sing_pubkey(signature, sign_lenght,document, doc_lenght, pkey );
     EVP_PKEY_free(pkey);
 
@@ -525,14 +582,17 @@ int verify_sign_cert(const uchar* certificate, const uint cert_lenght,  FILE* co
     if(!cert){ cerr << "Error: PEM_read_X509 returned NULL\n"; return 0; }
     
     // load CA certificate (self signed)
-    if(!CAcertificate){ cerr << "Error: cannot open ca certificate file (missing?)\n"; return 0; }
+    if(!CAcertificate){ 
+        cerr << "Error: cannot open ca certificate file (missing?)\n"; X509_free(cert); return 0; }
     X509* cacert = PEM_read_X509(CAcertificate, NULL, NULL, NULL);
-    if(!cacert){ cerr << "Error: PEM_read_X509 returned NULL\n"; return 0; }
+    if(!cacert){ X509_free(cert); cerr << "Error: PEM_read_X509 returned NULL\n"; return 0; }
 
     // load CA ctrl for revocation list
-    if(!CAcrl){ cerr << "Error: cannot open ca ctrl file (missing?)\n"; return 0; }
+    if(!CAcrl){ cerr << "Error: cannot open ca ctrl file (missing?)\n"; 
+        X509_free(cacert); X509_free(cert); return 0; }
     X509_CRL* crl = PEM_read_X509_CRL(CAcrl, NULL, NULL, NULL);
-    if(!crl){ cerr << "Error: PEM_read_X509_CRL returned NULL\n"; return 0; }
+    if(!crl){ cerr << "Error: PEM_read_X509_CRL returned NULL\n"; 
+        X509_free(cacert); X509_free(cert); return 0; }
   
 
     if(!verify_certificate( cert,  cacert, crl)){
@@ -551,11 +611,19 @@ int verify_sign_cert(const uchar* certificate, const uint cert_lenght,  FILE* co
     return ret;
 }
 
-int sign_document( const uchar* document, uint doc_lenght, FILE* const priv_key, char* const password, uchar** signature, uint* sign_lenght){
-    if(!priv_key){ cerr << "Error: cannot open private key file  (missing?)\n"; return 0; }
-    EVP_PKEY* prvkey = PEM_read_PrivateKey(priv_key, NULL, NULL, password);
-    if(!prvkey){ cerr << "Error: PEM_read_PrivateKey returned NULL\n"; return 0; }
-    if(!document || doc_lenght==0) { cerr << "Error: no document \n"; EVP_PKEY_free(prvkey);return 0; }
+int sign_document( const uchar* document, uint doc_lenght, FILE* const priv_key, char* const password, 
+        uchar** signature, uint* sign_lenght){
+    void* pkey=read_privkey(priv_key,password );
+    int ret=sign_document(document, doc_lenght, pkey, signature, sign_lenght);
+    safe_free_privkey(pkey);
+    return ret;
+        
+}
+
+int sign_document( const uchar* document, uint doc_lenght, void* priv_key, uchar** signature, uint* sign_lenght){
+    EVP_PKEY* prvkey = (EVP_PKEY*)priv_key;
+    if(!prvkey){ cerr << "Error:no private key\n"; return 0; }
+    if(!document || doc_lenght==0) { cerr << "Error: no document \n"; return 0; }
 
     // declare some useful variables:
     int ret;
@@ -563,60 +631,31 @@ int sign_document( const uchar* document, uint doc_lenght, FILE* const priv_key,
 
     // create the signature context:
     EVP_MD_CTX* md_ctx = EVP_MD_CTX_new();
-    if(!md_ctx){ cerr << "Error: EVP_MD_CTX_new returned NULL\n"; EVP_PKEY_free(prvkey);return 0; }
+    if(!md_ctx){ cerr << "Error: EVP_MD_CTX_new returned NULL\n"; return 0; }
 
     // allocate buffer for signature:
     *signature = (unsigned char*)malloc(EVP_PKEY_size(prvkey));
-    if(!*signature) { cerr << "Error: malloc returned NULL (signature too big?)\n";EVP_PKEY_free(prvkey);return 0; }
+    if(!*signature) { 
+        cerr << "Error: malloc returned NULL (signature too big?)\n";
+        EVP_MD_CTX_free(md_ctx);
+        return 0; 
+    }
 
     // sign the plaintext:
     // (perform a single update on the whole plaintext, 
     // assuming that the plaintext is not huge)
     ret = EVP_SignInit(md_ctx, md);
-    if(ret == 0){ cerr << "Error: EVP_SignInit returned " << ret << "\n"; EVP_PKEY_free(prvkey);return 0; }
+    if(ret == 0){ cerr << "Error: EVP_SignInit returned " << ret << "\n"; 
+        EVP_MD_CTX_free(md_ctx); return 0; }
     ret = EVP_SignUpdate(md_ctx, document, doc_lenght);
-    if(ret == 0){ cerr << "Error: EVP_SignUpdate returned " << ret << "\n"; EVP_PKEY_free(prvkey);return 0; }
+    if(ret == 0){ cerr << "Error: EVP_SignUpdate returned " << ret << "\n"; 
+        EVP_MD_CTX_free(md_ctx); return 0; }
     ret = EVP_SignFinal(md_ctx, *signature, sign_lenght, prvkey);
-    if(ret == 0){ cerr << "Error: EVP_SignFinal returned " << ret << "\n";EVP_PKEY_free(prvkey);return 0; }
+    if(ret == 0){ cerr << "Error: EVP_SignFinal returned " << ret << "\n";
+        EVP_MD_CTX_free(md_ctx); return 0; }
 
     // delete the digest and the private key from memory:
     EVP_MD_CTX_free(md_ctx);
-    EVP_PKEY_free(prvkey);
-    return 1;
-}
-
-// print a key, useful for debug
-void print_key(EVP_PKEY* key){
-    BIO *bp = BIO_new_fp(stdout, BIO_NOCLOSE);
-    EVP_PKEY_print_public(bp, key, 1, NULL);
-    BIO_free(bp);
-}
-
-uint serialize_pubkey(EVP_PKEY* pubkey, uchar** pubkey_ser){
-    
-    BIO* mbio= BIO_new(BIO_s_mem());
-    if(!mbio){ cerr << "Error: cannot initialize BIO\n"; return 0;  }
-    if(!PEM_write_bio_PUBKEY(mbio, pubkey)){cerr << "Error: unable to write in BIO\n"; return 0; }
-    uchar* tmp=NULL;
-
-    // obtain size and allocate buffer
-    int ret= BIO_get_mem_data(mbio,&tmp);
-    *pubkey_ser=(uchar*)malloc(ret);
-    if(*pubkey_ser==NULL){ cerr << "unable to allocate buffer for serialized pubkey\n"; return 0;  }
-    
-    memcpy(*pubkey_ser, tmp, ret);
-    BIO_free(mbio);
-    return ret;
-}
-
-int deserialize_pubkey(const uchar* pubkey_ser, uint key_lenght, EVP_PKEY** pubkey){
-    
-    BIO* mbio= BIO_new(BIO_s_mem());
-    if(!mbio){ cerr << "Error: cannot initialize BIO\n"; return 0;  }
-    if(! BIO_write(mbio, pubkey_ser, key_lenght)){cerr << "Error: unable to write in BIO\n"; return 0; }
-    *pubkey = PEM_read_bio_PUBKEY( mbio, NULL, NULL, NULL);
-    BIO_free(mbio);
-    if(*pubkey==nullptr) {cerr << "Error: bio read returned null\n"; return 0; }
     return 1;
 }
 
@@ -629,20 +668,37 @@ int eph_key_generate(void** privkey, uchar** pubkey, uint* pubkey_len ){
     // using elliptic-curve
     pctx = EVP_PKEY_CTX_new_id(EVP_PKEY_EC, NULL);
     if(!pctx){cerr << "Error: unable to allocate EC generation context";return 0;}
-    if(!EVP_PKEY_paramgen_init(pctx)){cerr << "Error: unable to initialize EC parameters generation";return 0;};
+    if(!EVP_PKEY_paramgen_init(pctx)){
+        cerr << "Error: unable to initialize EC parameters generation";
+        EVP_PKEY_CTX_free(pctx);
+        return 0;
+    }
     EVP_PKEY_CTX_set_ec_paramgen_curve_nid(pctx, NID_X9_62_prime256v1);
-    if(!EVP_PKEY_paramgen(pctx, &dh_params)){cerr << "Error: unable to generate EC parameters";return 0;};
+    if(!EVP_PKEY_paramgen(pctx, &dh_params)){
+        cerr << "Error: unable to generate EC parameters";
+        EVP_PKEY_CTX_free(pctx);
+        return 0;
+    }
     EVP_PKEY_CTX_free(pctx);
 
     // using DH keys
     EVP_PKEY_CTX* ctx=EVP_PKEY_CTX_new(dh_params, NULL);
-    if(!ctx){cerr << "Error: unable to allocate DH context";return 0;}
-    if(1!=EVP_PKEY_keygen_init(ctx)){cerr << "Error: unable to initialize DH context";return 0;}
-    if(1!=EVP_PKEY_keygen(ctx, &priv_key)){cerr << "Error: unable to generate DH keys";return 0;}
+    if(!ctx){cerr << "Error: unable to allocate DH context";EVP_PKEY_free(dh_params);return 0;}
+    if(1!=EVP_PKEY_keygen_init(ctx)){
+        cerr << "Error: unable to initialize DH context";
+        EVP_PKEY_CTX_free(ctx);
+        EVP_PKEY_free(dh_params);
+        return 0;
+    }
+    if(1!=EVP_PKEY_keygen(ctx, &priv_key)){
+        cerr << "Error: unable to generate DH keys";
+        EVP_PKEY_CTX_free(ctx);
+        EVP_PKEY_free(dh_params);
+        return 0;
+    }
     EVP_PKEY_CTX_free(ctx);
     EVP_PKEY_free(dh_params);
   
-
     // serialize public key
     *pubkey_len= serialize_pubkey(priv_key, pubkey);
     if(!*pubkey){cerr << "Error: unable to serialize DH keys\n";return 0;}
@@ -653,7 +709,7 @@ int eph_key_generate(void** privkey, uchar** pubkey, uint* pubkey_len ){
 
 uint derive_secret(void* privkey, uchar* peer_key, uint peer_key_len , uchar** secret ){
     EVP_PKEY_CTX *derive_ctx;
-    size_t skeylen;
+    size_t skeylen=0;
 
     // deserialize keys
     EVP_PKEY* priv_key=(EVP_PKEY*) privkey;
@@ -664,23 +720,24 @@ uint derive_secret(void* privkey, uchar* peer_key, uint peer_key_len , uchar** s
 
     // secret derivation
     derive_ctx = EVP_PKEY_CTX_new(priv_key,NULL);
-    if (!derive_ctx) {cerr << "Error: unable to allocate DH derivation context";return 0;}
+    if (!derive_ctx) {cerr << "Error: unable to allocate DH derivation context";goto finish;}
     if (EVP_PKEY_derive_init(derive_ctx) <= 0) 
-        {cerr << "Error: unable to initialize DH derivation context";return 0;}
+        {cerr << "Error: unable to initialize DH derivation context"; goto finish;}
     /*Setting the peer with its pubkey*/
     if (EVP_PKEY_derive_set_peer(derive_ctx, peer_pubkey) <= 0) 
-        {cerr << "Error: unable to set peer public key";return 0;}
+        {cerr << "Error: unable to set peer public key";goto finish;}
     /* Determine buffer length, by performing a derivation but writing the result nowhere */
     if(!EVP_PKEY_derive(derive_ctx, NULL, &skeylen))
-        {cerr << "Error: unable to derive DH secret buffer lenght";return 0;}   
+        {cerr << "Error: unable to derive DH secret buffer lenght";goto finish;}   
     /*allocate buffer for the shared secret*/
     *secret = (uchar*)(malloc(int(skeylen)));
-    if (!*secret){cerr << "Error: unable to allocate DH secret buffer";return 0;}
+    if (!*secret){cerr << "Error: unable to allocate DH secret buffer";goto finish;}
     /*Perform again the derivation and store it in skey buffer*/
     if (EVP_PKEY_derive(derive_ctx, *secret, &skeylen) <= 0) 
-        {cerr << "Error: unable to derive DH secret";return 0;}
+        {cerr << "Error: unable to derive DH secret";skeylen=0; free(secret);goto finish;}
     
     //FREE EVERYTHING INVOLVED WITH THE EXCHANGE
+finish:
     EVP_PKEY_CTX_free(derive_ctx);
     EVP_PKEY_free(peer_pubkey);
     EVP_PKEY_free(priv_key);
@@ -695,6 +752,24 @@ int random_generate(const uint lenght, uchar* nuance){
         return 0;
     }
     return 1;
+}
+
+void safe_free_privkey(void* key){
+    EVP_PKEY* priv_key=(EVP_PKEY*) key;
+    EVP_PKEY_free(priv_key);
+}
+
+void safe_free(uchar* buffer, uint buffer_len ){
+#pragma optimize("", off)
+    memset(buffer, 0, buffer_len);
+#pragma optimize("", on)
+    free(buffer);
+}
+void* read_privkey(FILE* privk_file, char* const password){
+    if(!privk_file){ cerr << "Error: cannot open private key file  (missing?)\n"; return NULL; }
+    EVP_PKEY* prvkey = PEM_read_PrivateKey(privk_file, NULL, NULL, password);
+    if(!prvkey){ cerr << "Error: PEM_read_PrivateKey returned NULL\n"; return NULL; }
+    return prvkey;
 }
 /*
 int main(int argc, char* argv[]){

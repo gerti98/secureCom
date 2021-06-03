@@ -127,6 +127,17 @@ int verify_sign_cert(const uchar* certificate, const uint cert_lenght,  FILE* co
 int sign_document( const uchar* document, uint doc_lenght, FILE* const priv_key,char* const password,uchar** signature, uint* sign_lenght);
 
 /**
+ * @brief sign a document with a priv_key
+ * 
+ * @param document innput
+ * @param doc_lenght input
+ * @param priv_key 
+ * @param signature output 
+ * @param sign_lenght output
+ * @return 1 if successful, 0 otherwise 
+ */
+int sign_document( const uchar* document, uint doc_lenght, void* priv_key,uchar** signature, uint* sign_lenght);
+/**
  * @brief generate a random sequence 
  * 
  * @param lenght number of random bytes
@@ -155,4 +166,28 @@ int eph_key_generate(void** privkey, uchar** pubkey, uint* pubkey_len );
  * @return shared secret lenght, 0 on error(s) 
  */
 uint derive_secret(void* privkey, uchar* peer_key, uint peer_key_len , uchar** secret );
+
+/**
+ * @brief dellocate an UNSERIALIZED private key in a secure way
+ * 
+ * @param key pointer to the key to deallocate
+ */
+void safe_free_privkey(void* key);
+
+/**
+ * @brief dellocate a buffer (containing a SERIALIZED key for exaple) in a secure way
+ * 
+ * @param buffer the buffer to deallocate 
+ * @param buffer_len lenght of the buffer
+ */
+void safe_free(uchar* buffer, uint buffer_len );
+
+/**
+ * @brief read a private key from a file
+ * 
+ * @param privk_file file containing the private key
+ * @param password password for private_key file, if NULL and needed it will be asked by terminal input
+ * @return pointer to the UNSERIALIZED private key, musat be freed by safe_free_privkey()
+ */
+void* read_privkey(FILE* privk_file, char* const password);
 #endif
