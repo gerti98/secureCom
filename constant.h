@@ -70,6 +70,8 @@
 #define RELAY_CONTROL_TIME 3 //seconds
 #define RELAY_MSG_SIZE 100
 #define NONCE_SIZE 2
+#define AUTH_CLNT_SRV 1
+#define AUTH_CLNT_CLNT 2
 
 /**************************
 *   CRYPTO CONSTANTS
