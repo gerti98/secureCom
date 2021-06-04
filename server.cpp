@@ -349,7 +349,7 @@ void signal_handler(int sig)
 // FUNCTIONS of SECURITY
 // ---------------------------------------------------------------------
 
-
+uint32_t send_counter=0;
 
 /**
  * @brief perform a an authenticad encryption and then a send operation
@@ -358,13 +358,24 @@ void signal_handler(int sig)
 int send_secure(int comm_socket_id, uchar* pt, int pt_len){
     int ret;
     uchar *tag, *iv, *ct, *aad;
-    int aad_ct_len_net = htonl(pt_len); //Since we use GCM ciphertext == plaintext
+
     uint aad_len;
     log("Plaintext to send:");
     BIO_dump_fp(stdout, (const char*)pt, pt_len);
     uint32_t header_len = sizeof(uint32_t)+IV_DEFAULT+TAG_DEFAULT;
 
+    // adding sequence number
+    uint32_t counter_n=htonl(send_counter);
+    cout <<" adding sequrnce number " << counter_n<<endl;
+    uchar* pt_seq = (uchar*)malloc(pt_len+sizeof(uint32_t));
+    memcpy(pt_seq , &counter_n, sizeof(uint32_t));
+    memcpy(pt_seq+ sizeof(uint32_t), pt, pt_len);
+    pt=pt_seq;
+    pt_len+=sizeof(uint32_t);
+    log("Plaintext to send (with seq):");
+    BIO_dump_fp(stdout, (const char*)pt, pt_len);
 
+    int aad_ct_len_net = htonl(pt_len); //Since we use GCM ciphertext == plaintext
     int ct_len = auth_enc_encrypt(pt, pt_len, (uchar*)&aad_ct_len_net, sizeof(uint), session_key, &tag, &iv, &ct);
     if(ct_len == 0){
         log("auth_enc_encrypt failed");
@@ -401,6 +412,7 @@ int send_secure(int comm_socket_id, uchar* pt, int pt_len){
     }
     cout << " plaintext " << endl;
     BIO_dump_fp(stdout, (const char*)pt_test, pt_len_test);
+    safe_free(pt, pt_len);
     //------------------------------------------------------
     ret = send(comm_socket_id, msg_to_send, msg_to_send_len, 0);
     if(ret <= 0 || ret != msg_to_send_len){
@@ -408,12 +420,14 @@ int send_secure(int comm_socket_id, uchar* pt, int pt_len){
         safe_free(msg_to_send, msg_to_send_len);
         return 0;
     }
+    send_counter++;
     cout << " DBG - message sent " << endl;
     safe_free(msg_to_send, msg_to_send_len);
     return 1;
 }
 
 
+uint32_t receive_counter=0;
 /**
  * @brief perform a an authenticad decryption and then a send operation
  * @return 1 in case of success, 0 in case of error 
@@ -737,6 +751,8 @@ int handle_client_authentication(string pwd_for_keys){
         free(M3_signed);
         exit(1);    
     }
+    log("Shared Secret!");
+    BIO_dump_fp(stdout, (const char*) shared_seceret, shared_seceret_len);
     session_key_len=default_digest(shared_seceret, shared_seceret_len, &session_key);
     if(session_key_len == 0){
         log("Failed digest computation of the secret");
@@ -753,7 +769,7 @@ int handle_client_authentication(string pwd_for_keys){
     //Send user id of the client 
     int client_user_id = get_user_id_by_username(client_username);
     int client_user_id_net = htonl(client_user_id);
-
+    log("Found username in the datastore with user_id " + to_string(client_user_id_net));
 
 
     /*ret = send(comm_socket_id, (void*)&client_user_id_net, sizeof(int),0);
@@ -765,7 +781,10 @@ int handle_client_authentication(string pwd_for_keys){
     
     //Prova per send_secure
     
-    ret = send_secure(comm_socket_id, (uchar *)&client_user_id_net, sizeof(int));
+    uchar* userID_msg=(uchar*)malloc(5);
+    *userID_msg=USRID;
+    memcpy(userID_msg+1, &client_user_id_net,4);
+    ret = send_secure(comm_socket_id, userID_msg, sizeof(int)+1);
     if(ret == 0){
         log("Error on send secure");
         exit(1);

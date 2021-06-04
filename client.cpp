@@ -406,6 +406,9 @@ int receive_message(int sock_id, string& msg)
     return 0;
 }
 
+uint32_t receive_counter=0;
+uint32_t send_counter=0;
+
 int retrieve_my_userID(int socket)
 {
     cout << " DBG - Retrieving user id " << endl;
@@ -502,6 +505,8 @@ int retrieve_my_userID(int socket)
     cout << " ciphertext is: " << endl;
     BIO_dump_fp(stdout, (const char*)ciphertext, ct_len);
     // Decryption
+    cout<<"Session key:"<<endl;
+    BIO_dump_fp(stdout, (const char*) session_key_clientToServer, 32);
     pt_len = auth_enc_decrypt(ciphertext, ct_len, aad, sizeof(uint32_t), session_key_clientToServer, tag, iv, &plaintext);
     if(pt_len == 0 || pt_len!=ct_len){
         cerr << " Error during decryption " << endl;
@@ -521,19 +526,29 @@ int retrieve_my_userID(int socket)
     free(tag);
     free(iv);
 
-    /*uint8_t opcode_rec;
-    memcpy(&opcode_rec, plaintext, sizeof(uint8_t));
-
+    // check seq number
+    uint32_t sequece_number = ntohl(*(uint32_t*) plaintext);
+    cout << " received sequence number " << sequece_number  << " aka " << *(uint32_t*) plaintext<< endl;
+    if(sequece_number<receive_counter){
+        cerr << " Error: wrong seq number " << endl;
+        free(plaintext);
+        return -1;
+    }
+    receive_counter=sequece_number+1;
+    
+    // check opcode
+    uint8_t opcode_rec;
+    memcpy(&opcode_rec, plaintext+4, sizeof(uint8_t));
     cout << " opcode received is " << (uint16_t)opcode_rec << endl;
     if(opcode_rec!=USRID){
         cerr << " Error: wrong opcode " << endl;
         free(plaintext);
         return -1;
-    }*/
+    }
 
     int loggedUser_id_net;
     //BIO_dump_fp(stdout, (const char*)&loggedUser_id_net, sizeof(uint32_t));
-    memcpy(&loggedUser_id_net, plaintext, sizeof(uint32_t));
+    memcpy(&loggedUser_id_net, plaintext+sizeof(uint32_t)+1, sizeof(uint32_t));
     //BIO_dump_fp(stdout, (const char*)&loggedUser_id_net, sizeof(uint32_t));
     
     loggedUser_id = ntohl(loggedUser_id_net);
@@ -948,11 +963,10 @@ cout << " DBG - Deriving session key " << endl;
         free(eph_dh_pubKey);
         return -1;
     }
-    cout << "DBG - Session key generated!" << endl;
-    BIO_dump_fp(stdout, (const char*)secret, secret_len);
+    
     free(dh_server_pubkey);
     free(eph_dh_pubKey);
-    free(secret);
+
 
     session_key_clientToServer = NULL;
     uint32_t keylen;
@@ -960,9 +974,12 @@ cout << " DBG - Deriving session key " << endl;
     if(keylen==0){
         free(server_cert);
         free(session_key_clientToServer);
+        free(secret);
         return -1;
     }
-    
+    free(secret);
+    cout << "DBG - Session key generated!" << endl;
+    BIO_dump_fp(stdout, (const char*)session_key_clientToServer, keylen);
     /************************************************************
      * End of Authentication 
      ************************************************************/

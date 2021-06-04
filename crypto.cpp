@@ -343,14 +343,13 @@ int auth_enc_decrypt(uchar *ciphertext, uint ciphertext_len, uchar* aad, uint aa
     ctx = EVP_CIPHER_CTX_new();
     if(ctx == nullptr)    { 
         perror("Error: unallocated context\n");
-        free(plaintext);
+
         return 0;
     }
 
     // Encrypt init
     if(1 != EVP_DecryptInit(ctx,cypher, key, iv)) { 
         perror("Error: decryption init failed\n");
-        free(plaintext);
         EVP_CIPHER_CTX_cleanup(ctx);
         return 0;
     }
@@ -358,7 +357,7 @@ int auth_enc_decrypt(uchar *ciphertext, uint ciphertext_len, uchar* aad, uint aa
     // Encrypt Update: first call
     if(1 != EVP_DecryptUpdate(ctx, NULL, &len, aad, aad_len)) { 
         perror("Error: decryption update1 failed\n");
-        free(plaintext);
+
         EVP_CIPHER_CTX_cleanup(ctx);
         return 0;
     }
@@ -366,7 +365,7 @@ int auth_enc_decrypt(uchar *ciphertext, uint ciphertext_len, uchar* aad, uint aa
     // Encrypt Update: second call
     if(1 != EVP_DecryptUpdate(ctx, *plaintext, &len, ciphertext, ciphertext_len)) { 
         perror("Error: decryption update2 failed\n");
-        free(plaintext);
+
         EVP_CIPHER_CTX_cleanup(ctx);
         return 0;
     }
@@ -374,17 +373,16 @@ int auth_enc_decrypt(uchar *ciphertext, uint ciphertext_len, uchar* aad, uint aa
 
     if(1 != EVP_CIPHER_CTX_ctrl(ctx,EVP_CTRL_AEAD_SET_TAG, tag_len, tag)){ 
         perror("Error: decryption ctrl failed\n");
-        free(plaintext);
+
         EVP_CIPHER_CTX_cleanup(ctx);
         return 0;
     }
 
-    //Encrypt Final. Finalize the encryption and adds the padding
+    //Encrypt Final. Finalize the dencryption
     int ret= EVP_DecryptFinal(ctx, *plaintext + len, &len);
-    if(ret<0){ 
+    if(ret<=0){ 
         perror("Error: decryption final failed \n");
         EVP_CIPHER_CTX_cleanup(ctx);
-        free(plaintext);
         return 0;
     }
     plaintext_len += len;
@@ -841,11 +839,12 @@ int main(int argc, char* argv[]){
     return 0;
     
 }
-/*
-/*
+
+
 int main(){
 
     uchar key[] = "0123456789abcdeF";
+    uchar wrong_key[] = "0123456789ffffff";
     uchar plaintext[]="plaintext!=?PLAINTEXT1234";  
     int plaintext_len=26;
     // those are going to be allocated by the crypto API
@@ -869,17 +868,22 @@ int main(){
 	BIO_dump_fp (stdout, (const char *)ciphertext, cipher_len);
 	cout<<"Tag:"<<endl;
 	BIO_dump_fp (stdout, (const char *)tag, 16);
-    auth_enc_decrypt(ciphertext, cipher_len,aad, aad_len, key, tag, iv, &plainres);
-    cout<<"PT:"<<endl;
-	BIO_dump_fp (stdout, (const char *)plainres, 26);
-    cout <<plainres;
-    cout<<"\n";
+    int ret=auth_enc_decrypt(ciphertext, cipher_len,aad, aad_len, wrong_key, tag, iv, &plainres);
+    if(!ret)
+        cout<<"wrong key!"<<endl;
+    else{
+        cout<<"PT:"<<endl;
+	    BIO_dump_fp (stdout, (const char *)plainres, 26);
+        cout <<plainres;
+        cout<<"\n";
+        free(plainres);
+    }
 
     // free it's necessary after usage
     free(aad);
     free(iv);
     free(ciphertext);
-    free(plainres);
+    
     free(tag);
 
 
