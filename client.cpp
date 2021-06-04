@@ -1401,7 +1401,11 @@ int chatRequestHandler(unsigned char* plaintext)
 
 
     // INSERIRE AUTENTICAZIONE CLIENT-CLIENT
-
+    ret = authentication(sock_id, AUTH_CLNT_CLNT);
+    if(ret==-1){
+        cout << " Authentication with " << peer_username <<" failed " << endl;
+        return 0;
+    }
 
     isChatting = true;
     cout << " ******************************** " << endl;
@@ -1509,7 +1513,7 @@ int commandHandler(string userInput){
     * ********************************/
     if(isChatting && cmdToSend.opcode!=STOP_CHAT) {
         cout << " DBG - Sending message <" << msgGenToSend.payload << "> of length <" << msgGenToSend.length << " >" << endl;
-        ret = send_message(sock_id, &msgGenToSend);
+        ret = send_message(sock_id, &msgGenToSend); // TO DO IN SECURE WAY
         if(ret!=0){
             commandMSG stopAll;
             stopAll.opcode = STOP_CHAT;
@@ -1525,7 +1529,7 @@ int commandHandler(string userInput){
     else {
         // Send the command message to the server
         cout << " DBG - I have to sent a command message to the server ... " << endl;
-        ret = send_command_to_server(sock_id, &cmdToSend);
+        ret = send_command_to_server(sock_id, &cmdToSend); // TO DO IN SECURE WAY
         if(ret!=0){
             error = true;
             errorHandler(SEND_ERR);
