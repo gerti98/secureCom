@@ -55,7 +55,7 @@ msg_to_relay relay_msg;
 //Parameters of connection
 const char *srv_ipv4 = "127.0.0.1";
 const int srv_port = 4242;
-
+int peer_user_id_to_exchange;
 void* server_privk;
 
 uchar* session_key;
@@ -69,7 +69,8 @@ void* create_shared_memory(ssize_t size);
 
 //Shared memory for storing data of users
 void* shmem = create_shared_memory(sizeof(user_info)*REGISTERED_USERS);
-
+int send_secure(int comm_socket_id, uchar* pt, int pt_len);
+int recv_secure(int comm_socket_id, unsigned char** plaintext);
     
 void* create_shared_memory(ssize_t size){
     int protection = PROT_READ | PROT_WRITE; //Processes can read/write the contents of the memory
@@ -269,8 +270,6 @@ int relay_read(int user_id, msg_to_relay &msg, bool blocking){
 
     if(blocking)
         alarm(RELAY_CONTROL_TIME);
-    log("HEy");
-    
     return ret;
 }
 
@@ -307,19 +306,28 @@ void signal_handler(int sig)
             int msg_length = 9 + username_length; //TODO: not so good to hard code things
 
             // Send reply of the peer to the client
-            ret = send(comm_socket_id, relay_msg.buffer, msg_length, 0);
-            if(ret < msg_length)
+            ret = send_secure(comm_socket_id, (uchar*)relay_msg.buffer, msg_length);
+            if(ret == 0){
                 errorHandler(SEND_ERR);
+                exit(1);
+            }       
             log("Sent to client : ");    
             BIO_dump_fp(stdout, (const char*)relay_msg.buffer, ret);
 
         } else if(opcode == CHAT_POS || opcode == CHAT_NEG){
-            int msg_length = 5;
-            ret = send(comm_socket_id, relay_msg.buffer, msg_length, 0);
-            if(ret < msg_length)
+            int msg_len;
+            if(opcode == CHAT_NEG)
+                msg_len = 5;
+            else
+                msg_len = 5 + PUBKEY_DEFAULT;
+            memcpy((void*)(relay_msg.buffer + 1), (void*)&peer_user_id_to_exchange, sizeof(int));
+            ret = send_secure(comm_socket_id, (uchar*)relay_msg.buffer, msg_len);
+            if(ret == 0){
                 errorHandler(SEND_ERR);
-            log("Sent to client : ");    
-            BIO_dump_fp(stdout, (const char*)relay_msg.buffer, ret);
+                exit(1);
+            }
+            log("Sent to client (pt): ");    
+            BIO_dump_fp(stdout, (const char*)relay_msg.buffer, msg_len);
         } else if(opcode == CHAT_RESPONSE){
             uint16_t msg_length_net, msg_length;
             memcpy(&msg_length_net, (void*)(relay_msg.buffer + 3), sizeof(uint16_t));
@@ -329,11 +337,14 @@ void signal_handler(int sig)
             uint16_t total_plaintext_len = msg_length + 5;
 
             // Send reply of the peer to the client
-            ret = send(comm_socket_id, relay_msg.buffer, total_plaintext_len, 0);
-            if(ret < msg_length)
+            ret = send_secure(comm_socket_id, (uchar*)relay_msg.buffer, total_plaintext_len);
+            if(ret == 0){
                 errorHandler(SEND_ERR);
-            log("Sent to client : ");    
-            BIO_dump_fp(stdout, (const char*)relay_msg.buffer, ret);
+                exit(1);
+            }
+
+            log("Sent to client (pt): ");    
+            BIO_dump_fp(stdout, (const char*)relay_msg.buffer, total_plaintext_len);
         } else {
             log("OPCODE not recognized (" + to_string(opcode) + ")");
         }
@@ -353,11 +364,13 @@ uint32_t send_counter=0;
 
 /**
  * @brief perform a an authenticad encryption and then a send operation
+ * @param pt: pointer to plaintext without sequence number
  * @return 1 in case of success, 0 in case of error 
  */
 int send_secure(int comm_socket_id, uchar* pt, int pt_len){
     int ret;
     uchar *tag, *iv, *ct, *aad;
+    //alarm(0);
 
     uint aad_len;
     log("Plaintext to send:");
@@ -366,7 +379,7 @@ int send_secure(int comm_socket_id, uchar* pt, int pt_len){
 
     // adding sequence number
     uint32_t counter_n=htonl(send_counter);
-    cout <<" adding sequrnce number " << counter_n<<endl;
+    cout <<" adding sequrnce number " << send_counter << endl;
     uchar* pt_seq = (uchar*)malloc(pt_len+sizeof(uint32_t));
     memcpy(pt_seq , &counter_n, sizeof(uint32_t));
     memcpy(pt_seq+ sizeof(uint32_t), pt, pt_len);
@@ -423,20 +436,155 @@ int send_secure(int comm_socket_id, uchar* pt, int pt_len){
     send_counter++;
     cout << " DBG - message sent " << endl;
     safe_free(msg_to_send, msg_to_send_len);
+    //alarm(RELAY_CONTROL_TIME);
     return 1;
 }
 
 
 uint32_t receive_counter=0;
+
+//TODO: basically unmodified, maybe can be added to crypto.cpp
 /**
- * @brief perform a an authenticad decryption and then a send operation
- * @return 1 in case of success, 0 in case of error 
+ * @brief Receive in a secure way the messages sent by the server, decipher it and return the plaintext in the correspodent parameter. It
+ * also control the sequence number
+ * 
+ * @param socket socket id
+ * @param plaintext plaintext obtained by the decryption of the ciphertext
+ * @return int plaintext length or -1 if error
  */
-int recv_secure(){
-    return 0;
+int recv_secure(int comm_socket_id, unsigned char** plaintext)
+{
+    log(" DBG - SECURE RECEIVE ");
+
+    uint32_t header_len = sizeof(uint32_t)+IV_DEFAULT+TAG_DEFAULT; 
+    //cout << " DBG - header_len: " << header_len << endl;
+    uint32_t ct_len;
+    unsigned char* ciphertext = NULL;
+    uint32_t pt_len;
+    int ret;
+    //alarm(0);
+    unsigned char* header = (unsigned char*)malloc(header_len);
+    if(!header){
+        cerr << " Error in malloc for header " << endl; 
+        return -1;
+    }
+    unsigned char* iv = (unsigned char*)malloc(IV_DEFAULT);
+    if(!iv){
+        cerr << " Error in malloc for iv " << endl; 
+        safe_free(header, header_len);
+        return -1;
+    }
+    unsigned char* tag = (unsigned char*)malloc(TAG_DEFAULT);
+    if(!tag){
+        cerr << " Error in malloc for tag " << endl; 
+        safe_free(header, header_len);
+        safe_free(iv, IV_DEFAULT);
+        return -1;
+    }
+
+    // Receive Header
+    //cout << " DBG - Before recv " << endl;
+    //BIO_dump_fp(stdout, (const char*)header, header_len);
+    ret = recv(comm_socket_id, (void*)header, header_len, 0);
+    if(ret <= 0 || ret != header_len){
+        cerr << " Error in header reception " << ret << endl;
+        BIO_dump_fp(stdout, (const char*)header, header_len);
+        safe_free(tag, TAG_DEFAULT);
+        safe_free(header, header_len);
+        safe_free(iv, IV_DEFAULT);
+        return -1;
+    }
+    BIO_dump_fp(stdout, (const char*)header, header_len);
+
+    // Open header
+    memcpy((void*)&ct_len, header, sizeof(uint32_t));
+    log(" ct_len :");
+    BIO_dump_fp(stdout, (const char*)&ct_len, sizeof(uint32_t));
+
+    memcpy(iv, header+sizeof(uint32_t), IV_DEFAULT);
+    log(" iv :");
+    BIO_dump_fp(stdout, (const char*)iv, IV_DEFAULT);
+
+    memcpy(tag, header+sizeof(uint32_t)+IV_DEFAULT, TAG_DEFAULT);
+    log(" tag :");
+    BIO_dump_fp(stdout, (const char*)tag, TAG_DEFAULT);
+
+    unsigned char* aad = (unsigned char*)malloc(sizeof(uint32_t));
+    if(!aad){
+        cerr << " Error in aad malloc " << endl;
+        safe_free(tag, TAG_DEFAULT);
+        safe_free(header, header_len);
+        safe_free(iv, IV_DEFAULT);
+        return -1;
+    }
+    memcpy(aad, header, sizeof(uint32_t));
+    log(" AAD : ");
+    BIO_dump_fp(stdout, (const char*)aad, sizeof(uint32_t));
+
+    // Receive ciphertext
+    cout << " DBG - ct_len before ntohl is " << ct_len << endl;
+    ct_len = ntohl(ct_len);
+    cout << " DBG - ct_len real is " << ct_len << endl;
+
+    ciphertext = (unsigned char*)malloc(ct_len);
+    if(!ciphertext){
+        cerr << " Error in malloc for ciphertext " << endl;
+        safe_free(tag, TAG_DEFAULT);
+        safe_free(header, header_len);
+        safe_free(iv, IV_DEFAULT);
+        safe_free(aad, sizeof(uint32_t));
+        return -1;
+    }
+    ret = recv(comm_socket_id, (void*)ciphertext, ct_len, 0);
+    if(ret <= 0){
+        cerr << " Error in AAD reception " << endl;
+        safe_free(ciphertext, ct_len);
+        safe_free(tag, TAG_DEFAULT);
+        safe_free(header, header_len);
+        safe_free(iv, IV_DEFAULT);
+        safe_free(aad, sizeof(uint32_t));
+        return -1;
+    }
+    cout << " ciphertext is: " << endl;
+    BIO_dump_fp(stdout, (const char*)ciphertext, ct_len);
+
+    // Decryption
+    cout<<"Session key:"<<endl;
+    BIO_dump_fp(stdout, (const char*) session_key, 32);
+    pt_len = auth_enc_decrypt(ciphertext, ct_len, aad, sizeof(uint32_t), session_key, tag, iv, plaintext);
+    if(pt_len == 0 || pt_len!=ct_len){
+        cerr << " Error during decryption " << endl;
+        safe_free(*plaintext, pt_len);
+        safe_free(ciphertext, ct_len);
+        safe_free(tag, TAG_DEFAULT);
+        safe_free(header, header_len);
+        safe_free(iv, IV_DEFAULT);
+        safe_free(aad, sizeof(uint32_t));
+        return -1;
+    }
+    cout << " ciphertext is: " << endl;
+    BIO_dump_fp(stdout, (const char*)ciphertext, ct_len);
+    cout << " plaintext is " << endl;
+    BIO_dump_fp(stdout, (const char*)*plaintext, pt_len);
+    safe_free(ciphertext, ct_len);
+    safe_free(tag, TAG_DEFAULT);
+    safe_free(header, header_len);
+    safe_free(iv, IV_DEFAULT);
+    safe_free(aad, sizeof(uint32_t));
+
+    // check seq number
+    uint32_t sequece_number = ntohl(*(uint32_t*) (*plaintext));
+    cout << " received sequence number " << sequece_number  << " aka " << *(uint32_t*) (*plaintext) << endl;
+    cout << " Expected sequence number " << receive_counter << endl;
+    if(sequece_number<receive_counter){
+        cerr << " Error: wrong seq number " << endl;
+        safe_free(*plaintext, pt_len);
+        return -1;
+    }
+    receive_counter=sequece_number+1;
+    //alarm(RELAY_CONTROL_TIME);
+    return pt_len;
 }
-
-
 
 
 /**
@@ -451,13 +599,14 @@ int handle_client_authentication(string pwd_for_keys){
     uchar* R1 = (uchar*)malloc(NONCE_SIZE);
     if(!R1){
         errorHandler(MALLOC_ERR);
-        exit(1);
+        return -1;
     }
 
     ret = recv(comm_socket_id, (void *)R1, NONCE_SIZE, 0);
     if (ret <= 0 || ret != NONCE_SIZE){
         errorHandler(REC_ERR);
-        exit(1);
+        safe_free(R1, NONCE_SIZE);
+        return -1;
     }
     log("M1 auth (0) Received R1: ");
     BIO_dump_fp(stdout, (const char*)R1, NONCE_SIZE);
@@ -466,24 +615,25 @@ int handle_client_authentication(string pwd_for_keys){
     ret = recv(comm_socket_id, (void *)&client_username_len, sizeof(uint32_t), 0);
     if (ret <= 0 || ret != sizeof(uint32_t)){
         errorHandler(REC_ERR);
-        exit(1);
+        safe_free(R1, NONCE_SIZE);
+        return -1;
     }
     client_username_len = ntohl(client_username_len);
     log("M1 auth (1) Received username size: " + to_string(client_username_len));
 
-    char* username = (char*)malloc(sizeof(char)*client_username_len); //TODO: control size
+    char* username = (char*)malloc(client_username_len); //TODO: control size
     if(!username){
         errorHandler(MALLOC_ERR);
-        free(R1);
-        exit(1);
+        safe_free(R1, NONCE_SIZE);
+        return -1;
     }
 
     ret = recv(comm_socket_id, (void *)username, client_username_len, 0);
     if (ret <= 0 || ret != client_username_len){
         errorHandler(REC_ERR);
-        free(username);
-        free(R1);
-        exit(1);
+        safe_free((uchar*)username, client_username_len);
+        safe_free(R1, NONCE_SIZE);
+        return -1;
     }
     string client_username(username);
     log("M1 auth (2) Received username: " + client_username);
@@ -491,12 +641,12 @@ int handle_client_authentication(string pwd_for_keys){
     ret = set_user_socket(client_username, comm_socket_id); //to test the client
     if(ret != 1){
         cerr << "User not exist!" << endl;
-        free(username);
-        free(R1);
-        exit(1);
+        safe_free((uchar*)username, client_username_len);
+        safe_free(R1, NONCE_SIZE);
+        return -1;
     }
 
-    free(username);
+    safe_free((uchar*)username, client_username_len);
 
     /*************************************************************
      * M2 - Send R2,pubkey_eph,signature,certificate
@@ -504,8 +654,8 @@ int handle_client_authentication(string pwd_for_keys){
     uchar* R2 = (uchar*)malloc(NONCE_SIZE);
     if(!R2){
         errorHandler(MALLOC_ERR);
-        free(R1);
-        exit(1);
+        safe_free(R1, NONCE_SIZE);
+        return -1;
     }
 
     //Generate pair of ephermeral DH keys
@@ -515,11 +665,11 @@ int handle_client_authentication(string pwd_for_keys){
     ret = eph_key_generate(&eph_privkey_s, &eph_pubkey_s, &eph_pubkey_s_len);
     if(ret != 1){
         log("Error on EPH_KEY_GENERATE");
-        free(R2);
-        free(R1);
+        safe_free(R1, NONCE_SIZE);
+        safe_free(R2, NONCE_SIZE);
         safe_free_privkey(eph_privkey_s);
-        free(eph_pubkey_s);
-        exit(1);
+        safe_free(eph_pubkey_s, eph_pubkey_s_len);
+        return -1;
     }
     log("M2 auth (1) pubkey: ");
     BIO_dump_fp(stdout, (const char*)eph_pubkey_s, eph_pubkey_s_len);
@@ -528,11 +678,11 @@ int handle_client_authentication(string pwd_for_keys){
     ret = random_generate(NONCE_SIZE, R2);
     if(ret != 1){
         log("Error on random_generate");
-        free(R2);
-        free(R1);
+        safe_free(R1, NONCE_SIZE);
+        safe_free(R2, NONCE_SIZE);
         safe_free_privkey(eph_privkey_s);
-        free(eph_pubkey_s);
-        exit(1);
+        safe_free(eph_pubkey_s, eph_pubkey_s_len);
+        return -1;
     }
 
     log("auth (2) R2: ");
@@ -542,11 +692,11 @@ int handle_client_authentication(string pwd_for_keys){
     FILE* cert_file = fopen("certification/SecureCom_cert.pem", "rb"); //TODO: Maybe it's wrong this file
     if(!cert_file){
         log("Error on opening cert file");
-        free(R2);
-        free(R1);
+        safe_free(R1, NONCE_SIZE);
+        safe_free(R2, NONCE_SIZE);
         safe_free_privkey(eph_privkey_s);
-        free(eph_pubkey_s);
-        exit(1);
+        safe_free(eph_pubkey_s, eph_pubkey_s_len);
+        return -1;
     }
     
     uchar* certificate_ser;
@@ -554,11 +704,11 @@ int handle_client_authentication(string pwd_for_keys){
     if(certificate_len == 0){
         log("Error on serialize certificate");
         fclose(cert_file);
-        free(R2);
-        free(R1);
+        safe_free(R1, NONCE_SIZE);
+        safe_free(R2, NONCE_SIZE);
         safe_free_privkey(eph_privkey_s);
-        free(eph_pubkey_s);
-        exit(1);
+        safe_free(eph_pubkey_s, eph_pubkey_s_len);
+        return -1;
     }
     log("auth (3) certificate: ");
     BIO_dump_fp(stdout, (const char*)certificate_ser, certificate_len);
@@ -568,12 +718,12 @@ int handle_client_authentication(string pwd_for_keys){
     uchar* M2_to_sign = (uchar*)malloc(M2_to_sign_length);
     if(!M2_to_sign){
         log("Error on M2_to_sign");
-        free(R2);
-        free(R1);
+        safe_free(R1, NONCE_SIZE);
+        safe_free(R2, NONCE_SIZE);
         safe_free_privkey(eph_privkey_s);
-        free(eph_pubkey_s);
+        safe_free(eph_pubkey_s, eph_pubkey_s_len);
         fclose(cert_file);
-        exit(1);
+        return -1;
     }
 
     memcpy(M2_to_sign, R1, NONCE_SIZE);
@@ -586,14 +736,13 @@ int handle_client_authentication(string pwd_for_keys){
     ret = sign_document(M2_to_sign, M2_to_sign_length, server_privk,&M2_signed, &M2_signed_length);
     if(ret != 1){
         log("Error on signing part on M2");
-        free(R2);
-        free(R1);
-        free(M2_to_sign);
+        safe_free(M2_to_sign, M2_to_sign_length);
+        safe_free(R1, NONCE_SIZE);
+        safe_free(R2, NONCE_SIZE);
         safe_free_privkey(eph_privkey_s);
-        free(eph_pubkey_s);
+        safe_free(eph_pubkey_s, eph_pubkey_s_len);
         fclose(cert_file);
-   
-        exit(1);
+        return -1;
     }
     //Send M2 part by part
     
@@ -631,20 +780,22 @@ int handle_client_authentication(string pwd_for_keys){
     ret = send(comm_socket_id, M2, M2_size, 0);
     if(ret < M2_size){
         errorHandler(SEND_ERR);
-        free(R2);
-        free(R1);
-        free(M2_to_sign);
+        safe_free(M2_to_sign, M2_to_sign_length);
+        safe_free(R1, NONCE_SIZE);
+        safe_free(R2, NONCE_SIZE);
         safe_free_privkey(eph_privkey_s);
-        free(eph_pubkey_s);
-        exit(1);
+        safe_free(eph_pubkey_s, eph_pubkey_s_len);
+        return -1;
     }
     log("M2 sent");
     BIO_dump_fp(stdout, (const char*)M2, offset);
 
-    free(M2);
-    free(R1);
-    free(M2_to_sign);
-    free(eph_pubkey_s);
+        
+    safe_free(M2, M2_size);
+    safe_free(M2_to_sign, M2_to_sign_length);
+    safe_free(R1, NONCE_SIZE);
+    safe_free(eph_pubkey_s, eph_pubkey_s_len);
+    
 
     /*************************************************************
      * M3 - client_pubkey and signing of pubkey and R2
@@ -653,8 +804,9 @@ int handle_client_authentication(string pwd_for_keys){
     ret = recv(comm_socket_id, &eph_pubkey_c_len, sizeof(uint32_t), 0);
     if(ret <= 0 || ret != sizeof(uint32_t)){
         errorHandler(REC_ERR);
-        free(R2);
-        exit(1);
+        safe_free(R2, NONCE_SIZE);
+        safe_free_privkey(eph_privkey_s);
+        return -1;
     }
     
     eph_pubkey_c_len = ntohl(eph_pubkey_c_len);
@@ -664,8 +816,9 @@ int handle_client_authentication(string pwd_for_keys){
     uchar* eph_pubkey_c = (uchar*)malloc(eph_pubkey_c_len);
     if(!eph_pubkey_c ){
         errorHandler(MALLOC_ERR);
-        free(R2);
-        exit(1);
+        safe_free(R2, NONCE_SIZE);
+        safe_free_privkey(eph_privkey_s);
+        return -1;
     }
 
     ret = recv(comm_socket_id, eph_pubkey_c, eph_pubkey_c_len, 0);
@@ -673,7 +826,7 @@ int handle_client_authentication(string pwd_for_keys){
         errorHandler(REC_ERR);
         free(R2);
         free(eph_pubkey_c);
-        exit(1);
+        return -1;
     }
     log("M3 auth (2) pubkey_c:");
     BIO_dump_fp(stdout, (const char*)eph_pubkey_c, eph_pubkey_c_len);
@@ -682,9 +835,10 @@ int handle_client_authentication(string pwd_for_keys){
     ret = recv(comm_socket_id, &m3_signature_len, sizeof(uint32_t), 0);
     if(ret <= 0){
         errorHandler(REC_ERR);
-        free(R2);
-        free(eph_pubkey_c);
-        exit(1);
+        safe_free(R2, NONCE_SIZE);
+        safe_free_privkey(eph_privkey_s);
+        safe_free(eph_pubkey_c, eph_pubkey_c_len);
+        return -1;
     }
     m3_signature_len = ntohl(m3_signature_len);
     log("M3 auth (3) m3_signature_len: "+ to_string(m3_signature_len));
@@ -692,17 +846,19 @@ int handle_client_authentication(string pwd_for_keys){
     uchar* M3_signed = (uchar*)malloc(m3_signature_len); //TODO: control tainted
     if(!M3_signed){
         errorHandler(MALLOC_ERR);
-        free(R2);
-        free(eph_pubkey_c);
-        exit(1);
+        safe_free(R2, NONCE_SIZE);
+        safe_free_privkey(eph_privkey_s);
+        safe_free(eph_pubkey_c, eph_pubkey_c_len);
+        return -1;
     }
     ret = recv(comm_socket_id, M3_signed, m3_signature_len, 0);
     if(ret <= 0){
         errorHandler(REC_ERR);
-        free(R2);
-        free(eph_pubkey_c);
-        free(M3_signed);
-        exit(1);
+        safe_free(R2, NONCE_SIZE);
+        safe_free_privkey(eph_privkey_s);
+        safe_free(eph_pubkey_c, eph_pubkey_c_len);
+        safe_free(M3_signed, m3_signature_len);
+        return -1;
     }
 
     log("auth (4) M3 signed:");
@@ -712,21 +868,23 @@ int handle_client_authentication(string pwd_for_keys){
     FILE* pubkey_of_client = fopen(pubkey_of_client_path.c_str(), "rb");
     if(!pubkey_of_client){
         log("Unable to open pubkey of client");
-        free(R2);
-        free(eph_pubkey_c);
-        free(M3_signed);
-        exit(1);
+        safe_free(R2, NONCE_SIZE);
+        safe_free_privkey(eph_privkey_s);
+        safe_free(eph_pubkey_c, eph_pubkey_c_len);
+        safe_free(M3_signed, m3_signature_len);
+        return -1;
     }
 
     uint m3_document_size = eph_pubkey_c_len + NONCE_SIZE;
     uchar* m3_document = (uchar*)malloc(m3_document_size);
     if(!m3_document){
         errorHandler(MALLOC_ERR);
-        free(R2);
-        free(eph_pubkey_c);
-        free(M3_signed);
-        exit(1);
+        safe_free(R2, NONCE_SIZE);
+        safe_free_privkey(eph_privkey_s);
+        safe_free(eph_pubkey_c, eph_pubkey_c_len);
+        safe_free(M3_signed, m3_signature_len);
         fclose(pubkey_of_client);
+        return -1;
     }
 
     memcpy(m3_document, eph_pubkey_c,eph_pubkey_c_len );
@@ -735,10 +893,12 @@ int handle_client_authentication(string pwd_for_keys){
     ret = verify_sign_pubkey(M3_signed, m3_signature_len,m3_document,m3_document_size, pubkey_of_client);
     if(ret == 0){
         log("Failed sign verification on M3");
-        free(eph_pubkey_c);
-        free(M3_signed);
+        safe_free(R2, NONCE_SIZE);
+        safe_free_privkey(eph_privkey_s);
+        safe_free(eph_pubkey_c, eph_pubkey_c_len);
+        safe_free(M3_signed, m3_signature_len);
         fclose(pubkey_of_client);
-        exit(1);
+        return -1;
     }
     fclose(pubkey_of_client);
     uchar* shared_seceret;
@@ -747,25 +907,25 @@ int handle_client_authentication(string pwd_for_keys){
     shared_seceret_len = derive_secret(eph_privkey_s, eph_pubkey_c, eph_pubkey_c_len, &shared_seceret);
     if(shared_seceret_len == 0){
         log("Failed derive secret");
-        free(eph_pubkey_c);
-        free(M3_signed);
-        exit(1);    
+        safe_free(eph_pubkey_c, eph_pubkey_c_len);
+        safe_free(M3_signed, m3_signature_len);
+        return -1;    
     }
     log("Shared Secret!");
     BIO_dump_fp(stdout, (const char*) shared_seceret, shared_seceret_len);
     session_key_len=default_digest(shared_seceret, shared_seceret_len, &session_key);
     if(session_key_len == 0){
         log("Failed digest computation of the secret");
-        free(eph_pubkey_c);
-        free(M3_signed);
-        free(shared_seceret);
-        exit(1);    
+        safe_free(eph_pubkey_c, eph_pubkey_c_len);
+        safe_free(M3_signed, m3_signature_len);
+        safe_free(shared_seceret, shared_seceret_len);
+        return -1;    
     }
     log("Session key generated!");
     BIO_dump_fp(stdout, (const char*) session_key, session_key_len);
-    free(M3_signed);
-    free(shared_seceret);
-    free(eph_pubkey_c);
+    safe_free(eph_pubkey_c, eph_pubkey_c_len);
+    safe_free(M3_signed, m3_signature_len);
+    safe_free(shared_seceret, shared_seceret_len);
     //Send user id of the client 
     int client_user_id = get_user_id_by_username(client_username);
     int client_user_id_net = htonl(client_user_id);
@@ -787,7 +947,7 @@ int handle_client_authentication(string pwd_for_keys){
     ret = send_secure(comm_socket_id, userID_msg, sizeof(int)+1);
     if(ret == 0){
         log("Error on send secure");
-        exit(1);
+        return -1;
     }
 
 
@@ -807,23 +967,17 @@ int handle_client_authentication(string pwd_for_keys){
  *  Handle the response to the client for the !users_online command
  *  @return 0 in case of success, -1 in case of error
  */
-int handle_get_online_users(int comm_socket_id){
+int handle_get_online_users(int comm_socket_id, uchar* plaintext){
     log("\n\n*** USERS_ONLINE opcode arrived ***\n");
     int ret;
-    
-    /*
-    *   Format of the message to send
-    *     COMMAND_CODE | NUM_PAIRS | (USER_INDEX | LENGTH_USERNAME | USERNAME)*
-    */
-
+    uint offset_reply = 0; 
     unsigned char online_cmd = ONLINE_CMD;
     user_info* user_datastore_copy = get_user_datastore_copy();
     vlog("Obtained user datastore copy");
 
     //Need to calculate how much space to allocate and send (strings have variable length fields)
-    int total_space_to_allocate = 5; //
+    int total_space_to_allocate = 9; //TODO: control this number
     int online_users = 0; //also num_pairs
-    int curr_position = 5; //Offset of the buffer
     
     for(int i=0; i<REGISTERED_USERS; i++){
         //Count only online users
@@ -833,7 +987,7 @@ int handle_get_online_users(int comm_socket_id){
         }
     }
 
-    vlog("Calculated reply size");
+    vlog("Calculated reply size (pt): " + to_string(total_space_to_allocate));
     
     //Copy various fields in the reply msg
     uchar* replyToSend = (uchar*)malloc(total_space_to_allocate);
@@ -842,9 +996,11 @@ int handle_get_online_users(int comm_socket_id){
     uint32_t online_users_to_send = htonl(online_users);
     
     //Copy OPCODE and NUM_PAIRS
-    memcpy(replyToSend, (void*)&online_cmd, sizeof(unsigned char));
-    memcpy(replyToSend+1, (void*)&online_users_to_send, sizeof(int));
-    
+    memcpy(replyToSend+offset_reply, (void*)&online_cmd, sizeof(uchar));
+    offset_reply += sizeof(uchar);
+    memcpy(replyToSend+offset_reply, (void*)&online_users_to_send, sizeof(int));
+    offset_reply += sizeof(int);
+
     for(int i=0; i<REGISTERED_USERS; i++){
 
         //Copy ID, USERNAME_LENGTH and USERNAME for online users
@@ -853,213 +1009,233 @@ int handle_get_online_users(int comm_socket_id){
             uint32_t i_to_send = htonl(i);
             uint32_t curr_username_length_to_send = htonl(curr_username_length);
             
-            memcpy(replyToSend + curr_position, (void*)&i_to_send, sizeof(int));
-            memcpy(replyToSend + curr_position + 4, (void*)&curr_username_length_to_send, sizeof(int));
-            memcpy(replyToSend + curr_position + 8, (void*)user_datastore_copy[i].username.c_str(), curr_username_length);
-
-            curr_position = curr_position + 8 + curr_username_length;
+            memcpy(replyToSend + offset_reply, (void*)&i_to_send, sizeof(int));
+            offset_reply += sizeof(int);
+            memcpy(replyToSend + offset_reply, (void*)&curr_username_length_to_send, sizeof(int));
+            offset_reply += sizeof(int);
+            memcpy(replyToSend + offset_reply, (void*)user_datastore_copy[i].username.c_str(), curr_username_length);
+            offset_reply += curr_username_length;
         }
     }
 
-    log("Total length of buffer to send: " + to_string(curr_position));
-    
-    ret = send(comm_socket_id, replyToSend, total_space_to_allocate, 0);
-    if(ret < 0 || ret!=total_space_to_allocate){
-        free(replyToSend);
-        free(user_datastore_copy);
+    ret = send_secure(comm_socket_id, (uchar*)replyToSend, offset_reply);
+    if(ret == 0){
+        safe_free(replyToSend, total_space_to_allocate);
+        safe_free((uchar*)user_datastore_copy, REGISTERED_USERS*sizeof(user_info));
         errorHandler(SEND_ERR);
+        return -1;
     }
 
-    log("Sent to client: ");
-    BIO_dump_fp(stdout, (const char*)replyToSend, ret);
+    // log("Sent to client (pt): ");
+    // BIO_dump_fp(stdout, (const char*)replyToSend, ret);
         
-    free(replyToSend);
-    free(user_datastore_copy);
+    safe_free(replyToSend, total_space_to_allocate);
+    safe_free((uchar*)user_datastore_copy, REGISTERED_USERS*sizeof(user_info));
     return 0;    
 }
+
 
 
 /**
  *  @brief Handle the response to the client for the !chat command
  *  @return 0 in case of success, -1 in case of error
  */
-int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& relay_msg){
+int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& relay_msg, uchar* plaintext){
     log("\n\n*** CHAT opcode arrived ***\n");
-    // Consuming the receiving buffer
-    int peer_user_id;
-    int peer_user_id_net;
-    int ret = recv(comm_socket_id, (void *)&peer_user_id_net, sizeof(int), 0);
-    if (ret < 0)
-        errorHandler(REC_ERR);
-    if (ret == 0){
-        vlog("No message from the server");
-        exit(1);
-    }
+    uint offset_plaintext = 5; //From where data is good to read 
+    uint offset_relay = 0;
+    int ret;
 
-    peer_user_id = ntohl(peer_user_id_net);
+    int peer_user_id_net;
+    memcpy(&peer_user_id_net,(const void*)(plaintext + offset_plaintext),sizeof(int));
+    offset_plaintext += sizeof(int);
+    peer_user_id_to_exchange = ntohl(peer_user_id_net);
+    log("Peer user id: " + to_string(peer_user_id_to_exchange));
+
     unsigned char chat_cmd = CHAT_CMD;
     string client_username = get_username_by_user_id(client_user_id);
     int client_username_length = client_username.length();
     uint32_t client_username_length_net = htonl(client_username_length);
     uint32_t client_user_id_net = htonl(client_user_id);
-    int final_response_length = 5; //TODO: temporary
     const char* username = client_username.c_str();
     log(username);
-
-    
-    log("Request for chatting with user id " +  to_string(peer_user_id) + " arrived ");
+    log("Request for chatting with user id " +  to_string(peer_user_id_to_exchange) + " arrived ");
     // log("Username length is " + to_string(client_username_length) + " net: " + to_string(client_username_length_net));
 
-    //TODO: add sequence number
-    memcpy((void*)relay_msg.buffer, (void*)&chat_cmd, 1);
+    memcpy((void*)(relay_msg.buffer + offset_relay), (void*)&chat_cmd, 1);
+    offset_relay += sizeof(uchar);
+    memcpy((void*)(relay_msg.buffer + offset_relay), (void*)&client_user_id_net, sizeof(int));
+    offset_relay += sizeof(int);
+    memcpy((void*)(relay_msg.buffer + offset_relay), (void*)&client_username_length_net, sizeof(int));
+    offset_relay += sizeof(int);
+    memcpy((void*)(relay_msg.buffer + offset_relay), (void*)username, client_username_length);
+    offset_relay += client_username_length;
 
-    // PROPOSTA MODIFICA: stessa cosa commentata a riga 438
-    //client_user_id= htonl(client_user_id);
-    memcpy((void*)(relay_msg.buffer + 1), (void*)&client_user_id_net, sizeof(int));
-    memcpy((void*)(relay_msg.buffer + 5), (void*)&client_username_length_net, sizeof(int));
-    memcpy((void*)(relay_msg.buffer + 9), (void*)username, client_username_length);
+    string pubkey_of_client_path = "certification/" + client_username + "_pubkey.pem";
+    FILE* pubkey_of_client_file = fopen(pubkey_of_client_path.c_str(), "rb");
+    if(!pubkey_of_client_file){
+        log("Unable to open pubkey of client");
+        return -1;
+    }
+    //TODO: need to serialize certificate from file;
+    // uchar* pubkey_client;
+    // ret = serialize_pubkey_from_file(pubkey_of_client_file, &pubkey_client)
+    // memcpy((void*)(relay_msg.buffer + offset_relay), (void*)pubkey_client, PUBKEY_DEFAULT);
+    // offset_relay += PUBKEY_DEFAULT;
+
     log("Relaying: ");
-    BIO_dump_fp(stdout, relay_msg.buffer, (9 + client_username_length));
-    //TODO: add pubkey
-
-    
+    BIO_dump_fp(stdout, relay_msg.buffer, offset_relay);    
     //If no other request of notification send the message to the other process through his message queue
     vlog("Handle chat request (2)");
-    relay_write(peer_user_id, relay_msg);
+    relay_write(peer_user_id_to_exchange, relay_msg);
 
-    //Wait for response to the own named message queue (blocking)
-    vlog("Handle chat request (3)");
-    relay_read(client_user_id, relay_msg, true);
+    // //Wait for response to the own named message queue (blocking)
+    // vlog("Handle chat request (3)");
+    // relay_read(client_user_id, relay_msg, true);
 
-    //TODO: add sequence number
-    memcpy((void*)(relay_msg.buffer + 1), (void*)&peer_user_id, sizeof(int));    
+    // memcpy((void*)(relay_msg.buffer + 5), (void*)&peer_user_id, sizeof(int));    
 
     
-    vlog("Handle chat request (4)");
-    // Send reply of the peer to the client
-    ret = send(comm_socket_id, relay_msg.buffer, final_response_length, 0);
-    if(ret < 0 || ret!=5)
-        errorHandler(SEND_ERR);
-
-    /**
-     * 
-     *  WAIT FOR SECOND AUTHENTICATION if CHAT_POS has been sent
-     * 
-    **/
-
-    log("Sent to client: ");    
-    BIO_dump_fp(stdout, (const char*)relay_msg.buffer, ret);
+    // vlog("Handle chat request (4)");
+    // // Send reply of the peer to the client
+    // int final_response_length = 9; //TODO: temporary
+    // ret = send_secure(comm_socket_id, (uchar*)relay_msg.buffer, final_response_length);
+    // if(ret == 0){
+    //     errorHandler(SEND_ERR);
+    //     return -1;
+    // }
+    // /**
+    //  * 
+    //  *  WAIT FOR SECOND AUTHENTICATION if CHAT_POS has been sent: maybe can be managed in a more general way
+    //  * 
+    // **/
+    // log("Sent to client: ");    
+    // BIO_dump_fp(stdout, (const char*)relay_msg.buffer, ret);
 
     return 0;    
 }
 
 
-int handle_chat_pos(){
-    log("\n\n*** Received CHAT_POS command ***\n");
-    int peer_user_id;
-    int peer_user_id_net;
-    int ret = recv(comm_socket_id, (void *)&peer_user_id_net, sizeof(int), 0);
-    if (ret < 0)
-        errorHandler(REC_ERR);
-    if (ret == 0){
-        vlog("No message from the server");
-        exit(1);
-    }
+/**
+ * @brief handle CHAT_POS and CHAT_NEG commands
+ * @return -1 in case of errors, 0 in case of success
+ */
+int handle_chat_pos_neg(uchar* plaintext, uint8_t opcode){
+    if(opcode == CHAT_POS)
+        log("\n\n*** Received CHAT_POS command ***\n");
+    else if(opcode == CHAT_NEG)
+        log("\n\n*** Received CHAT_NEG command ***\n");
+    else if(opcode == STOP_CHAT)
+        log("\n\n*** Received STOP_CHAT command ***\n");
 
-    peer_user_id = ntohl(peer_user_id_net);
-    unsigned char chat_cmd = CHAT_POS;
+    uint offset_plaintext = 5;
+    uint offset_relay = 0;
+    int peer_user_id_net = (int)*(plaintext + offset_plaintext);
+    offset_plaintext += sizeof(int);
+    // int peer_user_id;
+    // int peer_user_id_net;
+    // int ret = recv(comm_socket_id, (void *)&peer_user_id_net, sizeof(int), 0);
+    // if (ret < 0)
+    //     errorHandler(REC_ERR);
+    // if (ret == 0){
+    //     vlog("No message from the server");
+    //     exit(1);
+    // }
+
+    int peer_user_id = ntohl(peer_user_id_net);
+    
+    log("Chat_pos to send for user_id " +  to_string(peer_user_id) + " arrived ");
     
 
-    log("Chat Positive to send for " +  to_string(peer_user_id) + " arrived ");
-    
-    //TODO: sequence number
-    memcpy((void*)relay_msg.buffer, (void*)&chat_cmd, 1);
-    memcpy((void*)(relay_msg.buffer + 1), (void*)&peer_user_id_net, sizeof(int));
-    log("Relaying: ");
-    BIO_dump_fp(stdout, relay_msg.buffer, 5);
-
-    //TODO: senderpubkey
-
-    log("handle_chat_pos (2)");
-    relay_write(peer_user_id, relay_msg);
-
-    /**
-     * 
-     *  WAIT FOR SECOND AUTHENTICATION
-     * 
-    **/
-    return 0;
-}
-
-
-int handle_chat_neg(){
-    log("\n\n*** Received CHAT_NEG command ***\n");
-    int peer_user_id;
-    int peer_user_id_net;
-    int ret = recv(comm_socket_id, (void *)&peer_user_id_net, sizeof(int), 0);
-    if (ret < 0)
-        errorHandler(REC_ERR);
-    if (ret == 0){
-        vlog("No message from the server");
-        exit(1);
+    memcpy((void*)(relay_msg.buffer + offset_relay), (void*)&opcode, sizeof(uchar));
+    offset_relay += sizeof(uchar);
+    memcpy((void*)(relay_msg.buffer + offset_relay), (void*)&peer_user_id_net, sizeof(int));
+    offset_relay += sizeof(int);
+    if(opcode == CHAT_POS){
+        //Adding pubkey
+        //TODO: need to serialize certificate from file;
+        // uchar* pubkey_client;
+        // ret = serialize_pubkey_from_file(pubkey_of_client_file, &pubkey_client)
+        // memcpy((void*)(relay_msg.buffer + offset_relay), (void*)pubkey_client, PUBKEY_DEFAULT);
+        // offset_relay += PUBKEY_DEFAULT;
     }
-    peer_user_id = ntohl(peer_user_id_net);
-    unsigned char chat_cmd = CHAT_NEG;
-
-    //TODO: sequence number
-    log("Chat Negative to send for " +  to_string(peer_user_id) + " arrived ");
-
-    memcpy((void*)relay_msg.buffer, (void*)&chat_cmd, 1);
-    memcpy((void*)(relay_msg.buffer + 1), (void*)&peer_user_id_net, sizeof(int));
+    
     log("Relaying: ");
-    BIO_dump_fp(stdout, relay_msg.buffer, 5);
-
+    BIO_dump_fp(stdout, relay_msg.buffer, offset_relay);
     relay_write(peer_user_id, relay_msg);
     return 0;
 }
+
+
+// int handle_chat_neg(uchar* plaintext){
+//     log("\n\n*** Received CHAT_NEG command ***\n");
+//     uint offset_plaintext = 4;
+//     int peer_user_id;
+//     int peer_user_id_net;
+//     int ret = recv(comm_socket_id, (void *)&peer_user_id_net, sizeof(int), 0);
+//     if (ret < 0)
+//         errorHandler(REC_ERR);
+//     if (ret == 0){
+//         vlog("No message from the server");
+//         exit(1);
+//     }
+//     peer_user_id = ntohl(peer_user_id_net);
+//     unsigned char chat_cmd = CHAT_NEG;
+
+//     //TODO: sequence number
+//     log("Chat Negative to send for " +  to_string(peer_user_id) + " arrived ");
+
+//     memcpy((void*)relay_msg.buffer, (void*)&chat_cmd, 1);
+//     memcpy((void*)(relay_msg.buffer + 1), (void*)&peer_user_id_net, sizeof(int));
+//     log("Relaying: ");
+//     BIO_dump_fp(stdout, relay_msg.buffer, 5);
+
+//     relay_write(peer_user_id, relay_msg);
+//     return 0;
+// }
 
 
 /**
  * @brief Handle CHAT command by sending it to the proper server process of the peer
- * @return 0 in case of errors, 1 otherwise 
+ * @return -1 in case of errors, 0 otherwise 
  */
-int handle_msg(){
+int handle_msg(uchar* plaintext){
     log("\n\n *** Received MSG command ***\n");
-    unsigned char cmd = CHAT_RESPONSE;
-    uint16_t peer_user_id, msg_length;
-    uint16_t peer_user_id_net, msg_length_net;
-    char* msg;
-    int ret = recv(comm_socket_id, (void *)&peer_user_id_net, sizeof(uint16_t), 0);
-    if (ret < 0)
-        errorHandler(REC_ERR);
-    if (ret == 0){
-        vlog("No message from the server");
-        exit(1);
-    }
-    ret = recv(comm_socket_id, (void *)&msg_length_net, sizeof(uint16_t), 0);
-    if (ret < 0)
-        errorHandler(REC_ERR);
-    if (ret == 0){
-        vlog("No message from the server");
-        exit(1);
-    }
+    uint offset_plaintext = 5;
 
-    peer_user_id = ntohs(peer_user_id_net);
-    msg_length = ntohs(msg_length_net);
+    unsigned char cmd = CHAT_RESPONSE;
+
+    uint16_t peer_user_id_net, msg_length_net;
+    memcpy(&peer_user_id_net, (void*)(plaintext + offset_plaintext), sizeof(uint16_t));
+    offset_plaintext += sizeof(uint16_t);
+    memcpy(&msg_length_net, (void*)(plaintext + offset_plaintext), sizeof(uint16_t));
+    offset_plaintext += sizeof(uint16_t);
+    char* msg;
+    // int ret = recv(comm_socket_id, (void *)&peer_user_id_net, sizeof(uint16_t), 0);
+    // if (ret < 0)
+    //     errorHandler(REC_ERR);
+    // if (ret == 0){
+    //     vlog("No message from the server");
+    //     exit(1);
+    // }
+    // ret = recv(comm_socket_id, (void *)&msg_length_net, sizeof(uint16_t), 0);
+    // if (ret < 0)
+    //     errorHandler(REC_ERR);
+    // if (ret == 0){
+    //     vlog("No message from the server");
+    //     exit(1);
+    // }
+
+    uint16_t peer_user_id = ntohs(peer_user_id_net);
+    uint16_t msg_length = ntohs(msg_length_net);
 
     log("Peer user id: " + to_string(peer_user_id) + ", msg_length: " + to_string(msg_length));
     msg = (char*)malloc(msg_length);
     if(!msg)
         errorHandler(MALLOC_ERR);
-    ret = recv(comm_socket_id, (void *)msg, msg_length, 0);
-    if (ret < 0)
-        errorHandler(REC_ERR);
-    if (ret == 0){
-        vlog("No message from the server");
-        exit(1);
-    }
+    memcpy(msg, (void*)(plaintext + offset_plaintext), msg_length);
+    offset_plaintext += msg_length;
 
-     //TODO: sequence number
     log("MSG to send for " +  to_string(peer_user_id) + " arrived ");
 
     int bytes_offset = 0;
@@ -1081,8 +1257,7 @@ int handle_msg(){
 
 
 
-int main()
-{
+int main(){
     //Create shared memory for mantaining info about users
     prior_cleanup();
     
@@ -1142,9 +1317,7 @@ int main()
         comm_socket_id = accept(listen_socket_id, (struct sockaddr *)&cl_addr, &len);
         pid = fork();
 
-        if (pid == 0)
-        {
-
+        if (pid == 0){
             close(listen_socket_id);
             log("Connection established with client");
 
@@ -1152,6 +1325,8 @@ int main()
             client_user_id = handle_client_authentication(password_for_keys);
             if(client_user_id == -1){
                 errorHandler(AUTHENTICATION_ERR);
+                log("Errore di autenticazione");
+                return -1;
             }
 
             // Every REQUEST_CONTROL_TIME seconds a signal is issued to control if the server has sent
@@ -1160,48 +1335,48 @@ int main()
             alarm(RELAY_CONTROL_TIME);
 
             //Child process
-            while (true)
-            {
-
+            while (true){
                 uchar msgOpcode;
- 
-                //Get Opcode from the client
-                ret = recv(comm_socket_id, (void *)&msgOpcode, sizeof(uint8_t), 0);
-
-                if (ret < 0)
+                uchar* plaintext;
+                ret = recv_secure(comm_socket_id, &plaintext);
+                if(ret == 0){
                     errorHandler(REC_ERR);
-                if (ret == 0){
-                    vlog("No message from the server");
-                    exit(1);
+                    return -1;
                 }
+                msgOpcode = (uchar)*(plaintext+4);
+                log("msgOpcode: " + to_string(msgOpcode));
+                
                 //Demultiplexing of opcode
                 switch (msgOpcode){
-                case CHAT_CMD:
-                    ret = handle_chat_request(comm_socket_id, client_user_id, relay_msg);
-                    if(ret<0)
-                        errorHandler(GEN_ERR);
+                case ONLINE_CMD:
+                    ret = handle_get_online_users(comm_socket_id, plaintext);
+                    if(ret<0) {
+                        log("Error on handle_get_online_users");
+                        return 0;
+                    }
                     break;
 
-                case ONLINE_CMD:
-                    ret = handle_get_online_users(comm_socket_id);
-                    if(ret<0)
-                        errorHandler(GEN_ERR);
+                case CHAT_CMD:
+                    ret = handle_chat_request(comm_socket_id, client_user_id, relay_msg, plaintext);
+                    if(ret<0) {
+                        log("Error on handle_chat_request");
+                        return 0;
+                    }
                     break;
                 
-                case CHAT_POS:
-                    ret = handle_chat_pos();
-                    if(ret<0)
-                        errorHandler(GEN_ERR);
-                    break;
-                case CHAT_NEG:
-                    ret = handle_chat_neg();
-                    if(ret<0)
-                        errorHandler(GEN_ERR);
+                case CHAT_POS || CHAT_NEG || STOP_CHAT:
+                    ret = handle_chat_pos_neg(plaintext, (msgOpcode == CHAT_POS)?true:false);
+                    if(ret<0) {
+                        log("Error on handle_chat_pos_neg");
+                        return 0;
+                    }
                     break;
                 case CHAT_RESPONSE:
-                    ret = handle_msg();
-                    if(ret < 0)
-                        errorHandler(MSG_ERR);
+                    ret = handle_msg(plaintext);
+                    if(ret<0) {
+                        log("Error on handle_msg");
+                        return 0;
+                    }
                     break;
                 default:
                     cout << "Command Not Valid" << endl;
@@ -1210,9 +1385,9 @@ int main()
 
             }
         }
-        else if (pid == -1)
-        {
+        else if (pid == -1){
             errorHandler(FORK_ERR);
+            return 0;
         }
 
         close(comm_socket_id);
