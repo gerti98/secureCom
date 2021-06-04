@@ -406,14 +406,28 @@ int receive_message(int sock_id, string& msg)
     return 0;
 }
 
+// Counter for freshness
 uint32_t receive_counter=0;
 uint32_t send_counter=0;
 
-int retrieve_my_userID(int socket)
+/**
+ * @brief Receive in a secure way the messages sent by the server, decipher it and return the plaintext in the correspodent parameter. It
+ * also control the sequence number
+ * 
+ * @param socket socket id
+ * @param plaintext plaintext obtained by the decryption of the ciphertext
+ * @return int plaintext length or -1 if error
+ */
+int recv_secure(int socket, unsigned char** plaintext)
 {
-    cout << " DBG - Retrieving user id " << endl;
-    uint32_t header_len = sizeof(uint32_t)+IV_DEFAULT+TAG_DEFAULT;
-    cout << " DBG - header_len: " << header_len << endl;
+    cout << " DBG - SECURE RECEIVE " << endl;
+    uint32_t header_len = sizeof(uint32_t)+IV_DEFAULT+TAG_DEFAULT; 
+    //cout << " DBG - header_len: " << header_len << endl;
+    uint32_t ct_len;
+    unsigned char* ciphertext = NULL;
+    uint32_t pt_len;
+    int ret;
+ 
     unsigned char* header = (unsigned char*)malloc(header_len);
     if(!header){
         cerr << " Error in malloc for header " << endl; 
@@ -432,16 +446,10 @@ int retrieve_my_userID(int socket)
         free(iv);
         return -1;
     }
-    uint32_t ct_len;
-    unsigned char* ciphertext = NULL;
-    unsigned char* plaintext = NULL;
-    uint32_t pt_len;
-    int ret;
 
     // Receive Header
     //cout << " DBG - Before recv " << endl;
     //BIO_dump_fp(stdout, (const char*)header, header_len);
-
     ret = recv(sock_id, (void*)header, header_len, 0);
     if(ret <= 0 || ret != header_len){
         cerr << " Error in header reception " << ret << endl;
@@ -452,6 +460,7 @@ int retrieve_my_userID(int socket)
         return -1;
     }
     BIO_dump_fp(stdout, (const char*)header, header_len);
+
     // Open header
     memcpy((void*)&ct_len, header, sizeof(uint32_t));
     cout << " ct_len :" << endl;
@@ -500,18 +509,17 @@ int retrieve_my_userID(int socket)
         free(iv);
         return -1;
     }
-
- 
     cout << " ciphertext is: " << endl;
     BIO_dump_fp(stdout, (const char*)ciphertext, ct_len);
+
     // Decryption
     cout<<"Session key:"<<endl;
     BIO_dump_fp(stdout, (const char*) session_key_clientToServer, 32);
-    pt_len = auth_enc_decrypt(ciphertext, ct_len, aad, sizeof(uint32_t), session_key_clientToServer, tag, iv, &plaintext);
+    pt_len = auth_enc_decrypt(ciphertext, ct_len, aad, sizeof(uint32_t), session_key_clientToServer, tag, iv, plaintext);
     if(pt_len == 0 || pt_len!=ct_len){
         cerr << " Error during decryption " << endl;
         free(ciphertext);
-        free(plaintext);
+        free(*plaintext);
         free(header);
         free(tag);
         free(iv);
@@ -520,22 +528,40 @@ int retrieve_my_userID(int socket)
     cout << " ciphertext is: " << endl;
     BIO_dump_fp(stdout, (const char*)ciphertext, ct_len);
     cout << " plaintext is " << endl;
-    BIO_dump_fp(stdout, (const char*)plaintext, pt_len);
+    BIO_dump_fp(stdout, (const char*)*plaintext, pt_len);
     free(ciphertext);
     free(header);
     free(tag);
     free(iv);
 
     // check seq number
-    uint32_t sequece_number = ntohl(*(uint32_t*) plaintext);
-    cout << " received sequence number " << sequece_number  << " aka " << *(uint32_t*) plaintext<< endl;
+    uint32_t sequece_number = ntohl(*(uint32_t*) (*plaintext));
+    cout << " received sequence number " << sequece_number  << " aka " << *(uint32_t*) (*plaintext) << endl;
+    cout << " Expected sequence number " << receive_counter << endl;
     if(sequece_number<receive_counter){
         cerr << " Error: wrong seq number " << endl;
         free(plaintext);
         return -1;
     }
     receive_counter=sequece_number+1;
-    
+
+    return pt_len;
+}
+
+/**
+ * @brief Called after authentication it is in charge of receving the user id of the logged user
+ * 
+ * @param socket 
+ * @return int -1 in case of error, 0 otherwise
+ */
+int retrieve_my_userID(int socket)
+{
+    cout << " DBG - Retrieving user id " << endl;
+    unsigned char* plaintext = NULL;
+    int pt_len = recv_secure(sock_id, &plaintext);
+    if(pt_len==-1)
+        return -1;
+
     // check opcode
     uint8_t opcode_rec;
     memcpy(&opcode_rec, plaintext+4, sizeof(uint8_t));
@@ -994,168 +1020,6 @@ cout << " DBG - Deriving session key " << endl;
 
 
 /**
- * @brief Handler that handles the SIG_ALARM, this represents the fact that every REQUEST_CONTROL_TIME the client must control for chat request
- *
- * 
- * @param sig 
-//  */
-// void signal_handler(int sig)
-// {
-//     // Se viene chiamato durante una comunicazione durante client e server rompe tutto perchè la listen legge un byte dal socket
-//    // cout << " DBG - Received signal for controlling the chat request from the server" << endl;
-//     uint8_t opcode = NOT_VALID_CMD;
-//     uint8_t response;
-//     int id_cp;
-//     unsigned char* counterpart;
-//     int size_username;
-//     char user_resp = 'a';
-//     unsigned char* risp_buff = NULL;
-//     size_t risp_buff_size = 0;
-
-//     int ret = recv(sock_id, (void*)&opcode, sizeof(uint8_t), MSG_DONTWAIT); 
-//     if(ret <= 0){
-//         //cout << " DBG - nothing received " << endl;
-//         alarm(REQUEST_CONTROL_TIME);
-//         return;
-//     }
-
-//     if(opcode!=CHAT_CMD){
-//         if(opcode==CHAT_RESPONSE){
-//             cout << " message arrived " << endl;
-//         }
-//         cout << " DBG - wrong opcode: " << (uint16_t)opcode << endl;
-//         alarm(REQUEST_CONTROL_TIME);
-//         return;
-//     }
-    
-//     cout << " DBG - Received a chat request " << endl;
-//     // Reading of sequence number - not present yet
-
-//     // Reading of the peer id
-//     ret = recv(sock_id, (void*)&id_cp, sizeof(int), 0); 
-//     if(ret <= 0){
-//         cout << " DBG - peer id not received " << endl;
-//         alarm(REQUEST_CONTROL_TIME);
-//         return;
-//     }
-//     //id_cp = ntohl(id_cp);
-    
-//     // Read username length
-//     ret = recv(sock_id, (void*)&size_username, sizeof(int), 0); 
-//     if(ret <= 0 || size_username==0){
-//         cout << " DBG - username length not received " << endl;
-//         alarm(REQUEST_CONTROL_TIME);
-//         return;
-//     }
-//     cout << " size: " << size_username << endl;
-//     int real_size_username = ntohl(size_username);
-//     cout << " size after ntohl " << real_size_username << endl;
-//     // Read username peer
-//     counterpart = (unsigned char*)malloc(size_username);
-//     if(!counterpart){
-//         cout << " DBG - malloc error for counterpart " << endl;
-//         alarm(REQUEST_CONTROL_TIME);
-//         // BUFFER OVERFLOW PROBLEM? RETURN IS ENOUGH?
-//         return;
-//     }
-
-//     ret = recv(sock_id, (void*)counterpart, size_username, 0); 
-//     if(ret <= 0){
-//         cout << " DBG - username not received " << endl;
-//         alarm(REQUEST_CONTROL_TIME);
-//         return;
-//     }
-//     cout << " cp: " << counterpart << endl;
-//     // Read sender pubkey - not present yet
-
-
-//     if(isChatting){
-//         cout << " DBG - Automatic response because I am chatting " << endl;
-//         // Automatic response
-//         free(counterpart);
-//         risp_buff_size = sizeof(uint8_t)+sizeof(int);
-//         risp_buff = (unsigned char*)malloc(risp_buff_size);
-//         if(!risp_buff){
-//             alarm(REQUEST_CONTROL_TIME);
-//             // BUFFER OVERFLOW PROBLEM? RETURN IS ENOUGH?
-//             return;
-//         }
-//         response = CHAT_NEG;
-//         memcpy(risp_buff, (void*)&response, sizeof(uint8_t));
-
-//         memcpy(risp_buff+1, (void*)&id_cp, sizeof(int));
-//         ret = send(sock_id, (void*)risp_buff, risp_buff_size, 0);
-//         free(risp_buff);
-//         alarm(REQUEST_CONTROL_TIME);
-//         return;
-//     }
-
-//     peer_id = ntohl(id_cp);
-//     peer_username = (char*)counterpart;
-//     cout << "\n **********************************************************" << endl;
-//     cout << " Do you want to chat with " << peer_username << " with user id " << peer_id << " ? (y/n)" << endl;
-//     free(counterpart);
-//     while(user_resp!='y' && user_resp!='n') {
-//         cin >> user_resp;
-//         if(user_resp=='y')
-//             response = CHAT_POS;
-//         else if (user_resp=='n')
-//             response = CHAT_NEG;
-//         else    
-//             cout << " Wrong format - Please write y if you want to accept, n otherwise " << endl;
-//     }
-
-//     risp_buff_size = sizeof(uint8_t)+sizeof(int); // sequence number not considere yet
-//     risp_buff = (unsigned char*)malloc(risp_buff_size);
-//     if(!risp_buff){
-//         alarm(REQUEST_CONTROL_TIME);
-//         // BUFFER OVERFLOW PROBLEM? RETURN IS ENOUGH?
-//         return;
-//     }
-    
-//     memcpy((void*)risp_buff, (void*)&response, sizeof(uint8_t));
-//     // insert sequence number - not present yet
-//     memcpy((void*)(risp_buff+1), (void*)&peer_id, sizeof(int));
-
-//     ret = send(sock_id, (void*)risp_buff, risp_buff_size, 0);
-//     free(risp_buff);
-
-//     // I am now chatting with the user that request to contact me
-//     // Clean stdin by what we have digit previously
-//   //  cin.clear();
-//     //fflush(stdin);
-
-//     isChatting = true;
-//     cout << " ******************************** " << endl;
-//     //cout << " Press Enter to enter in the chat section" << endl;
-//     cout << " ******************************** " << endl;
-//     cout << "               CHAT               " << endl;
-//     cout << " All the commands are ignored in this section except for !stop_chat " << endl;
-//     cout << " Send a message to " <<  peer_username << " \n > " <<  endl;
-
-//    // cin.putback('c');
-//     //cin.clear();
-//     //fflush(stdin);
-    
-//         //    printf(" > ");
-//     /*streambuf *backup;
-//     string test = "CHAT_STARTED";
-//     istringstream oss (test);
-//     backup = cin.rdbuf();
-//     cin.rdbuf(oss.rdbuf());
-//     *///string str;
-//     //cin >> str;
-//     //cout << "read " << str;
-
-
-
-//     //cin.putback
-//     //printf(" > ");
-//     alarm(REQUEST_CONTROL_TIME);
-//     return;
-// }
-
-/**
  * @brief handle an incoming chat request
  * 
  * @param sock_id communication socket
@@ -1412,7 +1276,16 @@ int arriveHandler(int sock_id){
     uint8_t op;
     int counterpart_id;
     int ret;
-    cout << " DBG - recived something" << endl;
+    cout << " DBG - received something" << endl;
+
+   /* unsigned char* plaintext = NULL;
+    int pt_len = recv_secure(sock_id, &plaintext);
+    if(pt_len==-1)
+        return -1;
+
+    memcpy(&op, plaintext, (uint8_t));
+    cout << " opcode arrived : " << op << endl;
+*/
     // I read the first byte to understand which type of message the server is sending to me
     ret = recv(sock_id, (void*)&op, sizeof(uint8_t), 0);  
     if(ret <= 0){
@@ -1582,14 +1455,15 @@ int main(int argc, char* argv[])
         errorHandler(AUTHENTICATION_ERR);
         goto close_all;
     }
-    cout << " --- AUTHENTICATION DONE --- \n > " << endl;
+    cout << " --- AUTHENTICATION DONE --- " << endl;
 
     // Every REQUEST_CONTROL_TIME seconds a signal is issued to control if the server has sent
     // a chat request originated from another clientS 
     // signal(SIGALRM, signal_handler);
     // alarm(REQUEST_CONTROL_TIME);
     
-    printf(" ciao ");
+    cout << " HELLO " << loggedUser << endl;
+
     while(true) {
         // fdlist must be initialized after each use of the select
         FD_ZERO(&fdlist);
@@ -1599,7 +1473,7 @@ int main(int argc, char* argv[])
         // cout << " IN WHILE " << endl;
         // cout << endl;
     
-        printf(" > ");
+        // printf(" > ");
         //cin >> userInput;
 
         int howManyDescr = 0;
