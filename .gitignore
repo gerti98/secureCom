@@ -7,3 +7,5 @@ crypto
 *.gz
 *.toc
 .vscode/
+experiment
+experiment.cpp

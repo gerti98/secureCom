@@ -316,7 +316,7 @@ void signal_handler(int sig)
             }       
             log("Sent to client : ");    
             BIO_dump_fp(stdout, (const char*)relay_msg.buffer, msg_length);
-
+        
         // } else if(opcode == CHAT_POS || opcode == CHAT_NEG){
         //     int msg_len;
         //     if(opcode == CHAT_NEG)
@@ -1083,9 +1083,8 @@ int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& re
         log("Unable to open pubkey of client");
         return -1;
     }
-    //TODO: need to serialize certificate from file;
-    uchar* pubkey_client_ser = (uchar*)malloc(PUBKEY_DEFAULT_SER);
-    int pubkey_client_ser_len = serialize_pubkey_from_file(pubkey_of_client_file, pubkey_client_ser);
+    uchar* pubkey_client_ser;
+    int pubkey_client_ser_len = serialize_pubkey_from_file(pubkey_of_client_file, &pubkey_client_ser);
     log("Pubkey ser len : " + to_string(pubkey_client_ser_len) + "(default: " + to_string(PUBKEY_DEFAULT_SER) + "), pubkey_ser:");
     BIO_dump_fp(stdout, (const char*)pubkey_client_ser, pubkey_client_ser_len);
 
@@ -1139,7 +1138,8 @@ int handle_chat_pos_neg(uchar* plaintext, uint8_t opcode){
         log("\n\n*** Received CHAT_NEG command ***\n");
     else if(opcode == STOP_CHAT)
         log("\n\n*** Received STOP_CHAT command ***\n");
-
+    else if(opcode == AUTH)
+        log("\n\n*** Received AUTH command ***\n");
     uint offset_plaintext = 5;
     uint offset_relay = 0;
     int peer_user_id_net = *(int*)(plaintext + offset_plaintext);
@@ -1174,8 +1174,8 @@ int handle_chat_pos_neg(uchar* plaintext, uint8_t opcode){
         }
         //Adding pubkey
         //TODO: need to serialize certificate from file;
-        uchar* pubkey_client_ser = (uchar*)malloc(PUBKEY_DEFAULT_SER);
-        int pubkey_client_ser_len = serialize_pubkey_from_file(pubkey_of_client_file, pubkey_client_ser);
+        uchar* pubkey_client_ser;
+        int pubkey_client_ser_len = serialize_pubkey_from_file(pubkey_of_client_file, &pubkey_client_ser);
         log("Pubkey ser len : " + to_string(pubkey_client_ser_len) + "(default: " + to_string(PUBKEY_DEFAULT_SER) + "), pubkey_client_ser:");
         BIO_dump_fp(stdout, (const char*)pubkey_client_ser, pubkey_client_ser_len);
 

@@ -781,16 +781,16 @@ void* read_privkey(FILE* privk_file, char* const password){
     return prvkey;
 }
 
-int serialize_pubkey_from_file(FILE* pubk_file, uchar* pubkey_buf){
+int serialize_pubkey_from_file(FILE* pubk_file, uchar** pubkey_buf){
     if(!pubk_file){ cerr << "Error: cannot open private key file  (missing?)\n"; return 0; }
     EVP_PKEY* pubk = PEM_read_PUBKEY(pubk_file, NULL, NULL, NULL);
     if(!pubk){ cerr << "Error: PEM_read_PUBKEY returned NULL\n"; return 0; }
     BIO* mbio = BIO_new(BIO_s_mem());
     PEM_write_bio_PUBKEY(mbio, pubk);
-    long pubkey_size = BIO_get_mem_data(mbio, &pubkey_buf);
+    long pubkey_size = BIO_get_mem_data(mbio, pubkey_buf);
     // log("BIO (written: " + to_string(pubkey_size) + "):");
     // BIO_dump_fp(stdout, (const char*)(*pubkey_buf), pubkey_size);
-    BIO_free(mbio);
+    // BIO_free(mbio);
     return pubkey_size;
 }
 

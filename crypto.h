@@ -197,5 +197,5 @@ void* read_privkey(FILE* privk_file, char* const password);
  * @param pubk_file file containing the public key
  * @return size of serialized pubkey, 0 in case of errors
  */
-int serialize_pubkey_from_file(FILE* pubk_file, uchar* pubkey_buf);
+int serialize_pubkey_from_file(FILE* pubk_file, uchar** pubkey_buf);
 #endif
