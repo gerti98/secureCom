@@ -216,6 +216,20 @@ void prior_cleanup(){
     int msgid = msgget(key, 0666 | IPC_CREAT);
     vlog("msgid is " + to_string(msgid));
     msgctl(msgid, IPC_RMID, NULL);
+    msgid = msgget(key, 0666 | IPC_CREAT);
+    struct msqid_ds buf;
+    msgctl(msgid, IPC_RMID, NULL);
+    msgctl(msgid, IPC_STAT, &buf);
+    // cout << "Current # of bytes on queue 	" << buf.__msg_cbytes << endl;
+    // cout << "Current # of messages on queue	" << buf.msg_qnum << endl;
+    // cout << "Maximum # of bytes on queue 	" << buf.msg_qbytes << endl;
+    buf.msg_qbytes = 16000;
+    int ret = msgctl(msgid, IPC_SET, &buf);
+    msgctl(msgid, IPC_STAT, &buf);
+    cout << "Current # of bytes on queue 	" << buf.__msg_cbytes << endl;
+    cout << "Current # of messages on queue	" << buf.msg_qnum << endl;
+    cout << "Maximum # of bytes on queue 	" << buf.msg_qbytes << endl;
+    log("change size queue: " + to_string(ret));
 }
 
 // ---------------------------------------------------------------------
@@ -316,41 +330,38 @@ void signal_handler(int sig)
             }       
             log("Sent to client : ");    
             BIO_dump_fp(stdout, (const char*)relay_msg.buffer, msg_length);
-        
-        // } else if(opcode == CHAT_POS || opcode == CHAT_NEG){
-        //     int msg_len;
-        //     if(opcode == CHAT_NEG)
-        //         msg_len = 5;
-        //     else
-        //         msg_len = 5 + PUBKEY_DEFAULT_SER;
+        } else if(opcode == AUTH || opcode == CHAT_RESPONSE){
+            int msg_len;
+            memcpy(&msg_len, relay_msg.buffer + 1, sizeof(int)); //Added len field
+            uchar* msg_to_send = (uchar*)malloc(msg_len);
+            msg_to_send[0] = opcode;
+            memcpy(msg_to_send + 1, relay_msg.buffer + 5, msg_len - 1);
+            ret = send_secure(comm_socket_id, (uchar*)msg_to_send, msg_len);
+            if(ret == 0){
+                errorHandler(SEND_ERR);
+                free(msg_to_send);
+                exit(1);
+            }       
+            log("Sent to client : ");    
+            BIO_dump_fp(stdout, (const char*)msg_to_send, msg_len);
+            free(msg_to_send);
+        // } else if(opcode == CHAT_RESPONSE){
+        //     uint16_t msg_length_net, msg_length;
+        //     memcpy(&msg_length_net, (void*)(relay_msg.buffer + 3), sizeof(uint16_t));
+        //     msg_length = ntohs(msg_length_net);
+            
+        //     log("MSG LENGTH: " + msg_length);
+        //     uint16_t total_plaintext_len = msg_length + 5;
 
-        //     int peer_user_id_to_exchange_net = htonl(peer_user_id_to_exchange);
-        //     log("Peer user to exchange: " + to_string(peer_user_id_to_exchange));    
-        //     memcpy((void*)(relay_msg.buffer + 1), &peer_user_id_to_exchange_net, sizeof(int));
-        //     ret = send_secure(comm_socket_id, (uchar*)relay_msg.buffer, msg_len);
+        //     // Send reply of the peer to the client
+        //     ret = send_secure(comm_socket_id, (uchar*)relay_msg.buffer, total_plaintext_len);
         //     if(ret == 0){
         //         errorHandler(SEND_ERR);
         //         exit(1);
         //     }
+
         //     log("Sent to client (pt): ");    
-        //     BIO_dump_fp(stdout, (const char*)relay_msg.buffer, msg_len);
-        } else if(opcode == CHAT_RESPONSE){
-            uint16_t msg_length_net, msg_length;
-            memcpy(&msg_length_net, (void*)(relay_msg.buffer + 3), sizeof(uint16_t));
-            msg_length = ntohs(msg_length_net);
-            
-            log("MSG LENGTH: " + msg_length);
-            uint16_t total_plaintext_len = msg_length + 5;
-
-            // Send reply of the peer to the client
-            ret = send_secure(comm_socket_id, (uchar*)relay_msg.buffer, total_plaintext_len);
-            if(ret == 0){
-                errorHandler(SEND_ERR);
-                exit(1);
-            }
-
-            log("Sent to client (pt): ");    
-            BIO_dump_fp(stdout, (const char*)relay_msg.buffer, total_plaintext_len);
+        //     BIO_dump_fp(stdout, (const char*)relay_msg.buffer, total_plaintext_len);
         } else {
             log("OPCODE not recognized (" + to_string(opcode) + ")");
         }
@@ -1120,9 +1131,6 @@ int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& re
         errorHandler(SEND_ERR);
         return -1;
     }
-    // log("Sent to client: ");    
-    // BIO_dump_fp(stdout, (const char*)relay_msg.buffer, ret);
-
     return 0;    
 }
 
@@ -1138,8 +1146,8 @@ int handle_chat_pos_neg(uchar* plaintext, uint8_t opcode){
         log("\n\n*** Received CHAT_NEG command ***\n");
     else if(opcode == STOP_CHAT)
         log("\n\n*** Received STOP_CHAT command ***\n");
-    else if(opcode == AUTH)
-        log("\n\n*** Received AUTH command ***\n");
+        
+    
     uint offset_plaintext = 5;
     uint offset_relay = 0;
     int peer_user_id_net = *(int*)(plaintext + offset_plaintext);
@@ -1191,94 +1199,98 @@ int handle_chat_pos_neg(uchar* plaintext, uint8_t opcode){
     return 0;
 }
 
+int handle_auth_and_msg(uchar* plaintext, uint8_t opcode, int plaintext_len){
+    if(opcode == AUTH)
+        log("\n\n Arrived AUTH (" + to_string(opcode) + ") command\n\n");
+    else if(opcode == CHAT_RESPONSE) 
+        log("\n\n Arrived CHAT_RESPONSE command\n\n");
 
-// int handle_chat_neg(uchar* plaintext){
-//     log("\n\n*** Received CHAT_NEG command ***\n");
-//     uint offset_plaintext = 4;
-//     int peer_user_id;
-//     int peer_user_id_net;
-//     int ret = recv(comm_socket_id, (void *)&peer_user_id_net, sizeof(int), 0);
-//     if (ret < 0)
-//         errorHandler(REC_ERR);
-//     if (ret == 0){
-//         vlog("No message from the server");
-//         exit(1);
-//     }
-//     peer_user_id = ntohl(peer_user_id_net);
-//     unsigned char chat_cmd = CHAT_NEG;
+    uint offset_plaintext = 5;
+    uint offset_relay = 0;
+    int plain_len_without_seq = plaintext_len - 4;
+    int peer_user_id_net = *(int*)(plaintext + offset_plaintext);
+    offset_plaintext += sizeof(int);
+    int peer_user_id = ntohl(peer_user_id_net);
+    
+    log("Command to send for user_id " +  to_string(peer_user_id) + " arrived ");
+    memcpy((void*)(relay_msg.buffer + offset_relay), (void*)&opcode, sizeof(uint8_t));
+    offset_relay += sizeof(uint8_t);
+    //Add length of msg in between
+    memcpy((void*)(relay_msg.buffer + offset_relay), (void*)&plain_len_without_seq, sizeof(int));
+    offset_relay += sizeof(int);
+    memcpy((void*)(relay_msg.buffer + offset_relay), (void*)(plaintext + 4), plaintext_len - 5);
+    offset_relay += (plaintext_len - 5);
+    log("plain_len_without_seq: " + to_string(plain_len_without_seq));
+    log("Relaying: ");
+    BIO_dump_fp(stdout, relay_msg.buffer, offset_relay);
+    relay_write(peer_user_id, relay_msg);
+    return 0;
+}
 
-//     //TODO: sequence number
-//     log("Chat Negative to send for " +  to_string(peer_user_id) + " arrived ");
+// /**
+//  * @brief Handle CHAT command by sending it to the proper server process of the peer
+//  * @return -1 in case of errors, 0 otherwise 
+//  */
+// int handle_msg(uchar* plaintext, int plaintext_len){
+//     log("\n\n *** Received MSG command ***\n");
+//     uint offset_plaintext = 5;
+//     uint offset_relay
+//     unsigned char cmd = CHAT_RESPONSE;
+//     int peer_user_id_net = *(int*)(plaintext + offset_plaintext);
+//     offset_plaintext += sizeof(int);
+//     int peer_user_id = ntohl(peer_user_id_net);
+//     memcpy((void*)(relay_msg.buffer), (void*)(plaintext + 4), plaintext_len - 4); //To skip the sequence number
 
-//     memcpy((void*)relay_msg.buffer, (void*)&chat_cmd, 1);
-//     memcpy((void*)(relay_msg.buffer + 1), (void*)&peer_user_id_net, sizeof(int));
+//     // uint16_t peer_user_id_net, msg_length_net;
+    
+//     // memcpy(&peer_user_id_net, (void*)(plaintext + offset_plaintext), sizeof(uint16_t));
+//     // offset_plaintext += sizeof(uint16_t);
+//     // memcpy(&msg_length_net, (void*)(plaintext + offset_plaintext), sizeof(uint16_t));
+//     // offset_plaintext += sizeof(uint16_t);
+//     // char* msg;
+//     // int ret = recv(comm_socket_id, (void *)&peer_user_id_net, sizeof(uint16_t), 0);
+//     // if (ret < 0)
+//     //     errorHandler(REC_ERR);
+//     // if (ret == 0){
+//     //     vlog("No message from the server");
+//     //     exit(1);
+//     // }
+//     // ret = recv(comm_socket_id, (void *)&msg_length_net, sizeof(uint16_t), 0);
+//     // if (ret < 0)
+//     //     errorHandler(REC_ERR);
+//     // if (ret == 0){
+//     //     vlog("No message from the server");
+//     //     exit(1);
+//     // }
+
+//     uint16_t peer_user_id = ntohs(peer_user_id_net);
+//     uint16_t msg_length = ntohs(msg_length_net);
+
+//     log("Peer user id: " + to_string(peer_user_id) + ", msg_length: " + to_string(msg_length));
+//     msg = (char*)malloc(msg_length);
+//     if(!msg)
+//         errorHandler(MALLOC_ERR);
+//     memcpy(msg, (void*)(plaintext + offset_plaintext), msg_length);
+//     offset_plaintext += msg_length;
+
+//     log("MSG to send for " +  to_string(peer_user_id) + " arrived ");
+
+//     int bytes_offset = 0;
+//     memcpy((void*)relay_msg.buffer, (void*)&cmd, sizeof(uint8_t));
+//     bytes_offset += sizeof(uint8_t);
+//     memcpy((void*)(relay_msg.buffer + bytes_offset), (void*)&peer_user_id_net, sizeof(uint16_t));
+//     bytes_offset += sizeof(uint16_t);
+//     memcpy((void*)(relay_msg.buffer + bytes_offset), (void*)&msg_length_net, sizeof(uint16_t));
+//     bytes_offset += sizeof(uint16_t);
+//     memcpy((void*)(relay_msg.buffer + bytes_offset), (void*)msg, msg_length);
+//     bytes_offset += msg_length;
+
 //     log("Relaying: ");
-//     BIO_dump_fp(stdout, relay_msg.buffer, 5);
+//     BIO_dump_fp(stdout, relay_msg.buffer, bytes_offset);
 
 //     relay_write(peer_user_id, relay_msg);
 //     return 0;
 // }
-
-
-/**
- * @brief Handle CHAT command by sending it to the proper server process of the peer
- * @return -1 in case of errors, 0 otherwise 
- */
-int handle_msg(uchar* plaintext){
-    log("\n\n *** Received MSG command ***\n");
-    uint offset_plaintext = 5;
-
-    unsigned char cmd = CHAT_RESPONSE;
-
-    uint16_t peer_user_id_net, msg_length_net;
-    memcpy(&peer_user_id_net, (void*)(plaintext + offset_plaintext), sizeof(uint16_t));
-    offset_plaintext += sizeof(uint16_t);
-    memcpy(&msg_length_net, (void*)(plaintext + offset_plaintext), sizeof(uint16_t));
-    offset_plaintext += sizeof(uint16_t);
-    char* msg;
-    // int ret = recv(comm_socket_id, (void *)&peer_user_id_net, sizeof(uint16_t), 0);
-    // if (ret < 0)
-    //     errorHandler(REC_ERR);
-    // if (ret == 0){
-    //     vlog("No message from the server");
-    //     exit(1);
-    // }
-    // ret = recv(comm_socket_id, (void *)&msg_length_net, sizeof(uint16_t), 0);
-    // if (ret < 0)
-    //     errorHandler(REC_ERR);
-    // if (ret == 0){
-    //     vlog("No message from the server");
-    //     exit(1);
-    // }
-
-    uint16_t peer_user_id = ntohs(peer_user_id_net);
-    uint16_t msg_length = ntohs(msg_length_net);
-
-    log("Peer user id: " + to_string(peer_user_id) + ", msg_length: " + to_string(msg_length));
-    msg = (char*)malloc(msg_length);
-    if(!msg)
-        errorHandler(MALLOC_ERR);
-    memcpy(msg, (void*)(plaintext + offset_plaintext), msg_length);
-    offset_plaintext += msg_length;
-
-    log("MSG to send for " +  to_string(peer_user_id) + " arrived ");
-
-    int bytes_offset = 0;
-    memcpy((void*)relay_msg.buffer, (void*)&cmd, sizeof(uint8_t));
-    bytes_offset += sizeof(uint8_t);
-    memcpy((void*)(relay_msg.buffer + bytes_offset), (void*)&peer_user_id_net, sizeof(uint16_t));
-    bytes_offset += sizeof(uint16_t);
-    memcpy((void*)(relay_msg.buffer + bytes_offset), (void*)&msg_length_net, sizeof(uint16_t));
-    bytes_offset += sizeof(uint16_t);
-    memcpy((void*)(relay_msg.buffer + bytes_offset), (void*)msg, msg_length);
-    bytes_offset += msg_length;
-
-    log("Relaying: ");
-    BIO_dump_fp(stdout, relay_msg.buffer, bytes_offset);
-
-    relay_write(peer_user_id, relay_msg);
-    return 0;
-}
 
 
 
@@ -1362,8 +1374,9 @@ int main(){
             while (true){
                 uchar msgOpcode;
                 uchar* plaintext;
-                ret = recv_secure(comm_socket_id, &plaintext);
-                if(ret == 0){
+                uint plain_len;
+                plain_len = recv_secure(comm_socket_id, &plaintext);
+                if(plain_len == 0){
                     errorHandler(REC_ERR);
                     return -1;
                 }
@@ -1398,7 +1411,8 @@ int main(){
                     }
                     break;
                 case CHAT_RESPONSE:
-                    ret = handle_msg(plaintext);
+                case AUTH:
+                    ret = handle_auth_and_msg(plaintext, msgOpcode, plain_len);
                     if(ret<0) {
                         log("Error on handle_msg");
                         return 0;
