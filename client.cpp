@@ -232,7 +232,7 @@ int retrieveOnlineUsers(unsigned char* plaintext)
         free_list_users(user_list);
     uint32_t howMany;
     int ret;
-    uint32_t bytes_read = 1; // Because I have already read the opcode
+    uint32_t bytes_read = 5; // Because I have already read the opcode and the seq number
     //int ret = recv(sock_id, (void*)&howMany, sizeof(int), 0);  
     memcpy(&howMany, plaintext+bytes_read, sizeof(uint32_t));
     bytes_read += sizeof(uint32_t);
@@ -1636,7 +1636,7 @@ int chatRequestHandler(unsigned char* plaintext)
     char user_resp = 'a';
     unsigned char* risp_buff = NULL;
     size_t risp_buff_size = 0;
-    uint32_t bytes_read = 1; // because I have already read the opcode
+    uint32_t bytes_read = 5; // because I have already read the opcode and the seq number
     cout << " DBG - Received a chat request " << endl;
 
     // Reading of the peer id
@@ -1914,7 +1914,7 @@ int arriveHandler(int sock_id){
     if(pt_len==-1)
         return -1;
 
-    memcpy(&op, plaintext, sizeof(uint8_t));
+    memcpy(&op, plaintext+sizeof(uint32_t), sizeof(uint8_t));
     cout << " opcode arrived : " << op << endl;
 
     // I read the first byte to understand which type of message the server is sending to me
@@ -1958,7 +1958,7 @@ int arriveHandler(int sock_id){
             errorHandler(REC_ERR);
             return -1;
         }*/
-        memcpy(&counterpart_id, plaintext+1, sizeof(int)); // +1 because I have already read the opcode
+        memcpy(&counterpart_id, plaintext+5, sizeof(int)); // +5 because I have already read the opcode and the seq number
         if(peer_username.empty()){
             cout << " DBG - Peer username is empty " << endl;
             error = true;
