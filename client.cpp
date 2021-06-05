@@ -1693,6 +1693,8 @@ int chatRequestHandler(unsigned char* plaintext)
     
     memcpy(peer_pub_key, plaintext+bytes_read, PUBKEY_DEFAULT);
     bytes_read += PUBKEY_DEFAULT;    
+    if(peer_pub_key==NULL)
+        return 0;
 
     if(isChatting){
         cout << " DBG - Automatic response because I am chatting " << endl;
@@ -1754,7 +1756,7 @@ int chatRequestHandler(unsigned char* plaintext)
     fflush(stdin);
 
 
-    // INSERIRE AUTENTICAZIONE CLIENT-CLIENT
+    // AUTENTICAZIONE CLIENT-CLIENT
     ret = authentication_receiver(sock_id);
     if(ret==-1){
         cout << " Authentication with " << peer_username <<" failed " << endl;
@@ -1971,6 +1973,23 @@ int arriveHandler(int sock_id){
         if(peer_id!=counterpart_id) {
             cout << " Server internal error: the user id requested and the one available does not match" << endl;
             break;
+        }
+
+        // Pub key of the peer
+        if(peer_pub_key!=NULL){
+            free(peer_pub_key); // old public key peer
+        }
+        peer_pub_key = (unsigned char*)malloc(PUBKEY_DEFAULT);
+        if(!peer_pub_key){
+            errorHandler(MALLOC_ERR);
+            free(plaintext);
+            return -1;
+        }
+        memcpy(peer_pub_key, plaintext+5+sizeof(int), PUBKEY_DEFAULT);
+        if(peer_pub_key==NULL){
+            cerr << " Error in receiving peer public key " << endl;
+            free(plaintext);
+            return -1;
         }
 
         authentication(sock_id, AUTH_CLNT_CLNT);
