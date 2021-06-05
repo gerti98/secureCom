@@ -1939,12 +1939,13 @@ int arriveHandler(int sock_id){
         else if (ret==-1){
             error = true;
             errorHandler(GEN_ERR);
-            
+            free(plaintext);
             return -1;
         }
         else if(print_list_users(user_list)!=0){
             error = true;
             errorHandler(GEN_ERR);
+            free(plaintext);
             return -1;
         }
         break;
@@ -1963,6 +1964,7 @@ int arriveHandler(int sock_id){
             cout << " DBG - Peer username is empty " << endl;
             error = true;
             errorHandler(GEN_ERR);
+            free(plaintext);
             return -1;
         }
                     
@@ -1992,12 +1994,14 @@ int arriveHandler(int sock_id){
             error = true;
             perror("chat response");
             errorHandler(REC_ERR);
+            free(plaintext);
             return -1;
         }
 
         if(peer_username.empty()){
             error = true;
             errorHandler(GEN_ERR);
+            free(plaintext);
             return -1;
         }
         cout << " " << peer_username << " -> " << message << endl;
@@ -2010,6 +2014,7 @@ int arriveHandler(int sock_id){
             error = true;
             perror("chat command");
             errorHandler(REC_ERR);
+            free(plaintext);
             return -1;
         }
     break;
@@ -2017,10 +2022,13 @@ int arriveHandler(int sock_id){
         error = true;
         cout << " DBG - opcode: " << (uint16_t)op << endl;
         errorHandler(SRV_INTERNAL_ERR);
+        free(plaintext);
         return -1;
     }
     break;
     }
+
+    free(plaintext);
     return 1;
 }
 
