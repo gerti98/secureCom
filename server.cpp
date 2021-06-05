@@ -218,12 +218,11 @@ void prior_cleanup(){
     msgctl(msgid, IPC_RMID, NULL);
     msgid = msgget(key, 0666 | IPC_CREAT);
     struct msqid_ds buf;
-    msgctl(msgid, IPC_RMID, NULL);
     msgctl(msgid, IPC_STAT, &buf);
     // cout << "Current # of bytes on queue 	" << buf.__msg_cbytes << endl;
-    // cout << "Current # of messages on queue	" << buf.msg_qnum << endl;
-    // cout << "Maximum # of bytes on queue 	" << buf.msg_qbytes << endl;
-    buf.msg_qbytes = 16000;
+    cout << "Current # of messages on queue	" << buf.msg_qnum << endl;
+    cout << "Maximum # of bytes on queue 	" << buf.msg_qbytes << endl;
+    buf.msg_qbytes = 16384;
     int ret = msgctl(msgid, IPC_SET, &buf);
     msgctl(msgid, IPC_STAT, &buf);
     cout << "Current # of bytes on queue 	" << buf.__msg_cbytes << endl;
@@ -1218,7 +1217,7 @@ int handle_auth_and_msg(uchar* plaintext, uint8_t opcode, int plaintext_len){
     //Add length of msg in between
     memcpy((void*)(relay_msg.buffer + offset_relay), (void*)&plain_len_without_seq, sizeof(int));
     offset_relay += sizeof(int);
-    memcpy((void*)(relay_msg.buffer + offset_relay), (void*)(plaintext + 4), plaintext_len - 5);
+    memcpy((void*)(relay_msg.buffer + offset_relay), (void*)(plaintext + 5), plaintext_len - 5);
     offset_relay += (plaintext_len - 5);
     log("plain_len_without_seq: " + to_string(plain_len_without_seq));
     log("Relaying: ");

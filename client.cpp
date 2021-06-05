@@ -441,8 +441,8 @@ int recv_secure(int socket, unsigned char** plaintext)
         free(iv);
         return -1;
     }
-    cout << " ciphertext is: " << endl;
-    BIO_dump_fp(stdout, (const char*)ciphertext, ct_len);
+    // cout << " ciphertext is: " << endl;
+    // BIO_dump_fp(stdout, (const char*)ciphertext, ct_len);
 
     // Decryption
     cout<<"Session key:"<<endl;
@@ -457,8 +457,8 @@ int recv_secure(int socket, unsigned char** plaintext)
         free(iv);
         return -1;
     }
-    cout << " ciphertext is: " << endl;
-    BIO_dump_fp(stdout, (const char*)ciphertext, ct_len);
+    // cout << " ciphertext is: " << endl;
+    // BIO_dump_fp(stdout, (const char*)ciphertext, ct_len);
     cout << " plaintext is " << endl;
     BIO_dump_fp(stdout, (const char*)*plaintext, pt_len);
     free(ciphertext);
@@ -532,8 +532,8 @@ int send_secure(int comm_socket_id, uchar* pt, int pt_len){
     memcpy(msg_to_send + bytes_copied, ct, ct_len);
     bytes_copied += sizeof(uint);
 
-    log("Msg (authenticated and encrypted) to send, (copied " + to_string(bytes_copied) + " of " + to_string(msg_to_send_len) + "):");
-    BIO_dump_fp(stdout, (const char*)msg_to_send, msg_to_send_len);
+    // log("Msg (authenticated and encrypted) to send, (copied " + to_string(bytes_copied) + " of " + to_string(msg_to_send_len) + "):");
+    // BIO_dump_fp(stdout, (const char*)msg_to_send, msg_to_send_len);
 
     //-----------------------------------------------------------
     // Controllo encr/decr
@@ -718,6 +718,7 @@ int retrieve_my_userID(int socket)
  */
 int authentication(int sock_id, uint8_t ver)
 {
+    
     // If the authentication is done with another client with the word server is indicated the other client
     if(ver!=AUTH_CLNT_CLNT && ver!=AUTH_CLNT_SRV)
         return -1;
@@ -729,6 +730,7 @@ int authentication(int sock_id, uint8_t ver)
     uint16_t size_to_allocate;          
     size_t msg_bytes_written;               // how many byte of the messagge I have been written
     int ret;
+    int peer_id_net = htonl(peer_id);
     unsigned char* name = NULL;
     unsigned char* msg_auth_1 = NULL;
 
@@ -803,13 +805,14 @@ int authentication(int sock_id, uint8_t ver)
         msg_bytes_written += usernameSize;
     }
     else if(ver==AUTH_CLNT_CLNT){
+        cout << "Peer_id " << peer_id << " net:" << peer_id_net << endl;
         uint8_t op = AUTH;
         memcpy(msg_auth_1, (void*)&op, sizeof(uint8_t));
-        msg_bytes_written = sizeof(uint8_t);
+        msg_bytes_written = sizeof(uint8_t); 
+        memcpy(msg_auth_1+msg_bytes_written, (void*)&peer_id_net, sizeof(int));
+        msg_bytes_written += sizeof(int);
         memcpy(msg_auth_1+msg_bytes_written, nonce, NONCE_SIZE);
         msg_bytes_written += NONCE_SIZE;
-        memcpy(msg_auth_1+msg_bytes_written, (void*)&peer_id, sizeof(int));
-        msg_bytes_written += sizeof(int);
     }
 
     cout << " DBG - M1: " << endl;
@@ -869,6 +872,7 @@ int authentication(int sock_id, uint8_t ver)
             free(nonce);
             return -1;
         }
+        read_from_msg2 += sizeof(int);
         memcpy(server_nonce, msg2_pt + read_from_msg2, NONCE_SIZE);
         read_from_msg2 += NONCE_SIZE;
     }
@@ -1173,7 +1177,7 @@ int authentication(int sock_id, uint8_t ver)
         uint8_t op_tmp = AUTH;
         memcpy(msg_to_send_M3+msg_bytes_written, &op_tmp, sizeof(uint8_t));
         msg_bytes_written += sizeof(uint8_t);
-        memcpy(msg_to_send_M3+msg_bytes_written, &peer_id, sizeof(int));
+        memcpy(msg_to_send_M3+msg_bytes_written, &peer_id_net, sizeof(int));
         msg_bytes_written += sizeof(int);
     }
     memcpy(msg_to_send_M3 + msg_bytes_written, &n_eph_dh_pubKey_len, sizeof(uint32_t));
@@ -1296,8 +1300,9 @@ int authentication(int sock_id, uint8_t ver)
 int authentication_receiver(int sock_id)
 {
     int ret;
+    int peer_id_net = htonl(peer_id);
     uint8_t op_rec;
-    uint32_t id_dest;
+    uint32_t id_dest, id_dest_net;
     /*************************************************************
      * M1 - R1
      *************************************************************/
@@ -1315,9 +1320,7 @@ int authentication_receiver(int sock_id)
         safe_free(R1, NONCE_SIZE);
         return -1;
     }
-    log("M1 auth received: ");
-    BIO_dump_fp(stdout, (const char*)pt_M1, NONCE_SIZE);
-
+    
     uint32_t bytes_read = sizeof(uint32_t); // Because sequence number already read in recv_secure
 
     memcpy(&op_rec, pt_M1+bytes_read, sizeof(uint8_t));
@@ -1327,7 +1330,8 @@ int authentication_receiver(int sock_id)
         free(R1);
         safe_free(pt_M1, pt_M1_len);
     }
-    memcpy(&id_dest, pt_M1+bytes_read, sizeof(uint32_t));
+    memcpy(&id_dest_net, pt_M1+bytes_read, sizeof(uint32_t));
+    id_dest = ntohl(id_dest_net);
     bytes_read += sizeof(uint32_t);
     if(id_dest!=loggedUser_id){
         cerr << " Wrong destination id " << endl;
@@ -1336,6 +1340,9 @@ int authentication_receiver(int sock_id)
     }
     memcpy(R1, pt_M1+bytes_read, NONCE_SIZE);
     bytes_read+=NONCE_SIZE;
+
+    log("R1: ");
+    BIO_dump_fp(stdout, (const char*)R1, NONCE_SIZE);
 
     safe_free(pt_M1, pt_M1_len);
 
@@ -1413,7 +1420,7 @@ int authentication_receiver(int sock_id)
     }
 
     
-    ret = sign_document(M2_to_sign, M2_to_sign_length, privKey_file, &M2_signed, &M2_signed_length);
+    ret = sign_document(M2_to_sign, M2_to_sign_length, privKey_file, NULL, &M2_signed, &M2_signed_length);
     if(ret != 1){
         log("Error on signing part on M2");
         safe_free(M2_to_sign, M2_to_sign_length);
@@ -1438,7 +1445,7 @@ int authentication_receiver(int sock_id)
     uint8_t opcode = AUTH;
     memcpy(M2+offset, &opcode, sizeof(uint8_t));
     offset += sizeof(uint8_t);
-    memcpy(M2+offset, &peer_id, sizeof(uint32_t));
+    memcpy(M2+offset, &peer_id_net, sizeof(uint32_t));
     offset += sizeof(uint32_t);
     memcpy((void*)(M2 + offset), R2, NONCE_SIZE);
     offset += NONCE_SIZE;
@@ -1491,7 +1498,7 @@ int authentication_receiver(int sock_id)
         return -1;
     }
 
-    bytes_read = 1; // seq number already read in recv secure
+    bytes_read = 4; // seq number already read in recv secure
 
     memcpy(&op_rec, msg3+bytes_read, sizeof(uint8_t));
     bytes_read += sizeof(uint8_t);
@@ -1501,7 +1508,8 @@ int authentication_receiver(int sock_id)
         safe_free_privkey(eph_privkey_s);
         safe_free(msg3, msg3_len);
     }
-    memcpy(&id_dest, msg3+bytes_read, sizeof(uint32_t));
+    memcpy(&id_dest_net, msg3+bytes_read, sizeof(uint32_t));
+    id_dest = ntohl(id_dest_net);
     bytes_read += sizeof(uint32_t);
     if(id_dest!=loggedUser_id){
         cerr << " Wrong destination id " << endl;
@@ -1613,7 +1621,6 @@ int authentication_receiver(int sock_id)
     BIO_dump_fp(stdout, (const char*) session_key_clientToClient, session_key_clientToClient_len);
     safe_free(eph_pubkey_c, eph_pubkey_c_len);
     safe_free(shared_secret, shared_secret_len);
-    safe_free_privkey(eph_privkey_s);
     
     cout << " AUTHENTICATION WITH " << peer_username << " SUCCESFULLY EXECUTED " << endl;
     return 0;
@@ -1646,7 +1653,7 @@ int chatRequestHandler(unsigned char* plaintext)
         alarm(REQUEST_CONTROL_TIME);
         return 0;
     }*/
-    memcpy(&id_cp, plaintext, sizeof(int));
+    memcpy(&id_cp, (plaintext + bytes_read), sizeof(int));
     bytes_read += sizeof(int);
     // htonl of id_cp is done afterwards
     
