@@ -159,8 +159,33 @@ anything; if the server try to implement a "man in the middle" attack he will on
 because the protocol is protected by private key signatures. Also in this case, DH keys are discared after 
 the handshake, and future messages are numbered againts reply attacks.
 
+
+
+\chapter{Implemetation}
+\section{Software Architecture}
+From an implementation prospective, the client program has to communicate with user and server; in the
+server program instead, messages have to pass from one process to another in order to be delivered to the
+recipient client.
+\begin{figure}[H]
+	\centering
+	\includegraphics[scale=0.24]{img/Implementation_scheme.png}
+	\caption{Implementation scheme}
+	\label {img: Implementation_scheme}
+\end{figure}
+At the beginning the client will connect to a standard server port which is in listening state; than the communication
+is commuted to another port, with a dedicated server process. At the end of the secure handshake, the process will be 
+dedicated to the authenticated user who is connected. This server process is able to read from his dedicated queue of 
+incoming messages, and relay messages to others client via their queue; at constant intervals a timer will read all the 
+messages from the incomin queue and it will forward them to the client. When this behaveour is unwanted, the relative interrupt
+is disabled.
+Using the system call \texttt{select()} the client is able to listen from multiple source of input, in this
+case communication socket and terminal. In this way the client program is able, for example, to automatically refuse a chat request 
+when the user is already chatting.
+
 \section{Alghoritms and Protocols}
 We briefly describe the cypher suite we choose to use in order to guarantee security specifications.
+Cyphers are the same for Cient-Server and Cient-Cient communication, specific message formats are reported In
+Capter 4.
 \subsection{Public Key Authentication}
 \paragraph*{Long Term Keys}
 The Cerification Authority (CA) have a \texttt{Publick Key}, included in a self-signed
@@ -181,50 +206,20 @@ To ensure freshness in the challenge-response scheme we use \texttt{16 bytes non
 From the handshake we obtain a 256-bits simmetric key which is used in \texttt{AES-256 GCM} authenticated encryprion protocol.
 We use a \texttt{16 bytes} tag for authentication of cyphertext and clear fields in the header. GCM scheme ensure a cyphertext
 size equal to the plaintext size; this makes programming easier, mantaining an optimal resistance against all known attacks.
-Messages excanged in sessions are numbered, starting from 1, to a maximum of $2^{32}-1$ (\verb|0xFFFFFFFF|), which is the
+Messages exchanged in sessions are numbered, starting from 1, to a maximum of $2^{32}-1$ (\verb|0xFFFFFFFF|), which is the
 maximum integer representable on 32 bits; this will make possible to identify a message reply, done
 my an attacker. The session is automatically closed when a message with number \verb|0xFFFFFFFF| is recived.
 Clients mantains two counter for the communication with the server:  one for the next message to send and another for
 the next message to receive; the same thing is done for the communication with another client (to prevent the server to 
 reply a message); also the server has to implement this behaveour in sessions with clients.
 
-\chapter{Implemetation}
-\section{Client}
-
-\subsection{How To Handle The Chat Request}
-\noindent Let's start from the simple case in which a client wants to chat with another client and makes a request to the server: 
-\begin{itemize}
-	\item The standard channel is used to send either the request for chat and for the server's answers.
-	\item If the target client accepts then the main process receive the confirmation from the server, then the main process set isChatting to true and it starts to chat.
-\end{itemize}
-
-\noindent When the server receive the command to chat with someone he has to send the chat request to the given client. Let suppose that Alice wants to chat with Bob. In this case the following steps must be performed:
-
-\begin{itemize}
-	\item The request must be done through the request channel
-	\item The client daemon process (Alice's daemon process) is listening on its socket (see after) and receive the request, then it reads the variable isChatting: if it is true the daemon process refuses automatically the server request, otherwise it ask (HANDSHAKE) to the main process if he wants to speak with Bob. 
-	\item The main process answer to the server by means of the daemon tools, if the answer is positive then it sets isChatting to true and so it waits for the message from Bob.
-\end{itemize}
-
-\noindent It's important to underline some concepts, first of all on the server side we have one process that handles two socket with the client, one for each channel. The protocol starts with the client that contacts the server, then the server and the client main process establish a connection and starts the protocol to establish a secure communication (Key Exchange). For standard messages this standard channel is used.
-
-\begin{figure}[H]
-	\centering
-	\includegraphics[scale=0.2]{img/chatRequestProtocolOneProcess.png}
-	\caption{Protocol Schema}
-	\label {img: chatRequestProtocolOneProcess}
-\end{figure}
-
-\noindent When the server has to sent a chat request to this client the request channel must be used. Thus it establishes a connection with the daemon process of the client that works as a server process and it is listening on port 4242 (see figure \ref{img: chatRequestProtocolOneProcess}). The security of this secondary channel is ensured by the fact that the messages sent by the server to the client on the request channel are encrypted with the shared key established during the handshake in the standard channel, hence we can say that the authentication problem is not present. In any case to implement a greater security is possible to generate client side a one time password that is sent to the server in the encrypted session through the standard channel, then the server will sent this otp to the client daemon process to identify itself.
-	
-
-\noindent Other things to take in mind are:
-\begin{itemize}
-	\item We assume that who send the chat request is the first to send messages.
-	\item On the server side for each client two socket must be established, one for the standard channel and another one for the request channel but the process for each client is only one.
-\end{itemize}
-
-\section{Server}
+\subsection*{Note on Chat message encryprion }
+Chat message are encrypted twice, one time with the and Cient-Cient session key and 
+the second one with Cient-Server session key; this will not double the BIT strenght of the cypher against 
+a brute force attack, because of the \texttt{meet in the middle} attack. 
+At the same time, this fact makes the system more secure agaist a password recover attack; in case, for
+whatever reason, a session key between clients is discover by an attacker, this will not be enaugh for read private messages,
+because the attacker have to discover also the session key between a client and the server.
 
 \chapter{Messages Format}
 
