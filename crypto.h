@@ -190,4 +190,12 @@ void safe_free(uchar* buffer, uint buffer_len );
  * @return pointer to the UNSERIALIZED private key, musat be freed by safe_free_privkey()
  */
 void* read_privkey(FILE* privk_file, char* const password);
+
+/**
+ * @brief read a public key from a file
+ * 
+ * @param pubk_file file containing the public key
+ * @return size of serialized pubkey, 0 in case of errors
+ */
+int serialize_pubkey_from_file(FILE* pubk_file, uchar* pubkey_buf);
 #endif

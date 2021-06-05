@@ -473,6 +473,17 @@ int serialize_certificate(FILE* cert_file, uchar** certificate){
     return ret;
 }
 
+
+// int serialize_pubkey(FILE* pubkey_file, uchar** pubkey, string pwd){
+//     *pubkey=nullptr;
+//     if(!pubkey_file){ cerr << "Error: cannot open certificate file (missing?)\n"; return 0; }
+//     EVP_PKEY* pkey = PEM_read_PrivateKey(pubkey_file, NULL, NULL, NULL);
+//     if(!cert){ cerr << "Error: PEM_read_X509 returned NULL\n"; return 0;  }
+//     int ret=i2d_X509(cert, certificate);
+//     X509_free(cert);
+//     return ret;
+// }
+
 /**
  * @brief verify a certificate with a self signed CA certificate and ctrl
  * 
@@ -769,6 +780,22 @@ void* read_privkey(FILE* privk_file, char* const password){
     if(!prvkey){ cerr << "Error: PEM_read_PrivateKey returned NULL\n"; return NULL; }
     return prvkey;
 }
+
+int serialize_pubkey_from_file(FILE* pubk_file, uchar* pubkey_buf){
+    if(!pubk_file){ cerr << "Error: cannot open private key file  (missing?)\n"; return 0; }
+    EVP_PKEY* pubk = PEM_read_PUBKEY(pubk_file, NULL, NULL, NULL);
+    if(!pubk){ cerr << "Error: PEM_read_PUBKEY returned NULL\n"; return 0; }
+    BIO* mbio = BIO_new(BIO_s_mem());
+    PEM_write_bio_PUBKEY(mbio, pubk);
+    long pubkey_size = BIO_get_mem_data(mbio, &pubkey_buf);
+    // log("BIO (written: " + to_string(pubkey_size) + "):");
+    // BIO_dump_fp(stdout, (const char*)(*pubkey_buf), pubkey_size);
+    BIO_free(mbio);
+    return pubkey_size;
+}
+
+
+
 /*
 int main(int argc, char* argv[]){
     uchar* skey_A;

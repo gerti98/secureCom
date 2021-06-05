@@ -67,8 +67,8 @@
 #define REGISTERED_USERS 5
 #define BUFFER_MAX  102400
 #define REQUEST_CONTROL_TIME 30 // seconds
-#define RELAY_CONTROL_TIME 30 //seconds
-#define RELAY_MSG_SIZE 20000
+#define RELAY_CONTROL_TIME 15 //seconds
+#define RELAY_MSG_SIZE 8000
 #define NONCE_SIZE 2
 #define AUTH_CLNT_SRV 1
 #define AUTH_CLNT_CLNT 2
@@ -83,4 +83,5 @@
 #define TAG_DEFAULT 16
 #define IV_DEFAULT EVP_CIPHER_iv_length(AUTH_ENCRYPT_DEFAULT) // 12
 #define PUBKEY_DEFAULT 2048
+#define PUBKEY_DEFAULT_SER 451
 #endif
