@@ -292,7 +292,7 @@ void prior_cleanup(){
     //Add more space to buffer
     struct msqid_ds buf;
     msgctl(msgid, IPC_STAT, &buf);
-    buf.msg_qbytes = 1000000;
+    buf.msg_qbytes = 120000;
     int ret = msgctl(msgid, IPC_SET, &buf);
     msgctl(msgid, IPC_STAT, &buf);    
     log("Message queue size: " + to_string(buf.msg_qbytes));

@@ -1,0 +1,10 @@
+Per sbloccare il limite della message queue:
+
+1. modificare il file /etc/sysctl.conf ed aggiungere le seguenti tre righe in fondo (o modificarle se già presenti) (permessi di root necessari):
+
+kernel.msgmni=16384
+kernel.msgmax=120000
+kernel.msgmnb=120000
+
+2. Digitare comando:
+> sudo sysctl -p
