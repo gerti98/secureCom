@@ -594,7 +594,7 @@ int prepare_msg_for_client(unsigned char* pt, uint32_t pt_len, unsigned char** m
     uchar *tag, *iv, *ct, *aad;
 
     uint aad_len;
-    log("Plaintext to send:");
+    cout << " [DBG] - Plaintext of msg to prepare: " << endl;
     BIO_dump_fp(stdout, (const char*)pt, pt_len);
     uint32_t header_len = sizeof(uint32_t)+IV_DEFAULT+TAG_DEFAULT;
 
@@ -607,17 +607,17 @@ int prepare_msg_for_client(unsigned char* pt, uint32_t pt_len, unsigned char** m
         return 0;
     }
 
-    memcpy(pt_seq , &counter_n, sizeof(uint32_t));
-    memcpy(pt_seq+ sizeof(uint32_t), pt, pt_len);
+    memcpy(pt_seq, &counter_n, sizeof(uint32_t));
+    memcpy(pt_seq+sizeof(uint32_t), pt, pt_len);
     pt=pt_seq;
     pt_len+=sizeof(uint32_t);
-    log("Plaintext to send (with seq):");
+    cout << "Plaintext to send (with seq):" << endl;
     BIO_dump_fp(stdout, (const char*)pt, pt_len);
 
     int aad_ct_len_net = htonl(pt_len); //Since we use GCM ciphertext == plaintext
     int ct_len = auth_enc_encrypt(pt, pt_len, (uchar*)&aad_ct_len_net, sizeof(uint), session_key_clientToClient, &tag, &iv, &ct);
     if(ct_len == 0){
-        log("auth_enc_encrypt failed");
+        cerr << "auth_enc_encrypt failed" << endl;
         safe_free(pt, pt_len);
         free(iv);
         free(tag);
@@ -625,7 +625,7 @@ int prepare_msg_for_client(unsigned char* pt, uint32_t pt_len, unsigned char** m
         free(pt_seq);
         return 0;
     }
-    log("ct_len: " + to_string(ct_len)); 
+    cout << " ct_len: " << to_string(ct_len) << endl; 
     uint msg_to_send_len = ct_len + header_len, bytes_copied = 0;
     *msg_to_send = (uchar*)malloc(msg_to_send_len);
     if(!(*msg_to_send)){
@@ -648,6 +648,7 @@ int prepare_msg_for_client(unsigned char* pt, uint32_t pt_len, unsigned char** m
     memcpy((*msg_to_send) + bytes_copied, ct, ct_len);
     bytes_copied += sizeof(uint);
 
+    cout << " [DBG] - Message Prepared: " << endl; 
     BIO_dump_fp(stdout, (const char*)(*msg_to_send), bytes_copied);
 
     safe_free(pt, pt_len);
@@ -671,7 +672,7 @@ int send_secure(int comm_socket_id, uchar* pt, int pt_len){
     uchar *tag, *iv, *ct, *aad;
 
     uint aad_len;
-    log("Plaintext to send:");
+    cout << " [DBG] - Plaintext to send:" << endl;
     BIO_dump_fp(stdout, (const char*)pt, pt_len);
     uint32_t header_len = sizeof(uint32_t)+IV_DEFAULT+TAG_DEFAULT;
 
@@ -687,13 +688,13 @@ int send_secure(int comm_socket_id, uchar* pt, int pt_len){
     memcpy(pt_seq+ sizeof(uint32_t), pt, pt_len);
     pt=pt_seq;
     pt_len+=sizeof(uint32_t);
-    printf("Plaintext to send (with seq):");
+    cout << " Plaintext to send (with seq):" << endl;
     BIO_dump_fp(stdout, (const char*)pt, pt_len);
     cout << " pt_len -> " << pt_len << endl;
     int aad_ct_len_net = htonl(pt_len); //Since we use GCM ciphertext == plaintext
     int ct_len = auth_enc_encrypt(pt, pt_len, (uchar*)&aad_ct_len_net, sizeof(uint), session_key_clientToServer, &tag, &iv, &ct);
     if(ct_len == 0){
-        printf("auth_enc_encrypt failed");
+        cerr << "auth_enc_encrypt failed" << endl;
         free(iv);
         free(tag);
         free(ct);
@@ -820,7 +821,7 @@ int send_message(int sock_id, genericMSG* msgToSend)
         return -1;
     }
 
-    cout << " internal message prepared " << endl;
+    cout << " [DBG] - Internal message prepared " << endl;
     int bytes_allocated = 0;
     
     uint32_t net_peer_user_id = htonl(peer_id);
@@ -831,13 +832,13 @@ int send_message(int sock_id, genericMSG* msgToSend)
     memcpy((void*)(msg+bytes_allocated), msgInternalPart, msgInternalPart_len);
     bytes_allocated += msgInternalPart_len;
 
+    cout << " [DBG] - Msg To send (with opcode+userid and then msg)" << endl;
     BIO_dump_fp(stdout, (const char*)msg, bytes_allocated);
 
     if(bytes_allocated!=msg_len)
         cout << " qualcsoa non va " << endl;
 
     int ret = send_secure(sock_id, msg, msg_len);
-    
    // int ret = send_secure(sock_id, msgToSend->payload, msgToSend->length);
     if(ret==0){
         cerr << " send secure failed " << endl;
@@ -1278,7 +1279,7 @@ int authentication(int sock_id, uint8_t ver)
             free(signature);
             return -1;
         }
-        ret = verify_sign_pubkey(signature, len_signature, signed_msg, len_signed_msg, peer_pub_key, PUBKEY_DEFAULT);
+        ret = verify_sign_pubkey(signature, len_signature, signed_msg, len_signed_msg, peer_pub_key, PUBKEY_DEFAULT_SER);
         if(ret==0){
             cerr << " Verification of the signature of the peer failed " << endl;
             free(server_nonce);
@@ -1548,8 +1549,8 @@ int authentication_receiver(int sock_id)
     }
     memcpy(R1, pt_M1+bytes_read, NONCE_SIZE);
     bytes_read+=NONCE_SIZE;
-
-    log("R1: ");
+    
+    cout << "R1: " << endl;
     BIO_dump_fp(stdout, (const char*)R1, NONCE_SIZE);
 
     safe_free(pt_M1, pt_M1_len);
@@ -1791,7 +1792,7 @@ int authentication_receiver(int sock_id)
         safe_free(M3_signed, m3_signature_len);
     }
 
-    ret = verify_sign_pubkey(M3_signed, m3_signature_len, m3_document, m3_document_size, peer_pub_key, PUBKEY_DEFAULT);
+    ret = verify_sign_pubkey(M3_signed, m3_signature_len, m3_document, m3_document_size, peer_pub_key, PUBKEY_DEFAULT_SER);
     if(ret == 0){
         log("Failed sign verification on M3");
         safe_free(R2, NONCE_SIZE);
@@ -1905,12 +1906,12 @@ int chatRequestHandler(unsigned char* plaintext)
     // Public key of an old peer
     if(peer_pub_key!=NULL)
         free(peer_pub_key);
-    peer_pub_key = (unsigned char*)malloc(PUBKEY_DEFAULT);
+    peer_pub_key = (unsigned char*)malloc(PUBKEY_DEFAULT_SER);
     if(!peer_pub_key)
         return 0;    
     
-    memcpy(peer_pub_key, plaintext+bytes_read, PUBKEY_DEFAULT);
-    bytes_read += PUBKEY_DEFAULT;    
+    memcpy(peer_pub_key, plaintext+bytes_read, PUBKEY_DEFAULT_SER);
+    bytes_read += PUBKEY_DEFAULT_SER;    
     if(peer_pub_key==NULL)
         return 0;
 
@@ -2198,13 +2199,13 @@ int arriveHandler(int sock_id){
         if(peer_pub_key!=NULL){
             free(peer_pub_key); // old public key peer
         }
-        peer_pub_key = (unsigned char*)malloc(PUBKEY_DEFAULT);
+        peer_pub_key = (unsigned char*)malloc(PUBKEY_DEFAULT_SER);
         if(!peer_pub_key){
             errorHandler(MALLOC_ERR);
             free(plaintext);
             return -1;
         }
-        memcpy(peer_pub_key, plaintext+5+sizeof(int), PUBKEY_DEFAULT);
+        memcpy(peer_pub_key, plaintext+5+sizeof(int), PUBKEY_DEFAULT_SER);
         if(peer_pub_key==NULL){
             cerr << " Error in receiving peer public key " << endl;
             free(plaintext);
