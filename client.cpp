@@ -182,9 +182,13 @@ int chat(struct commandMSG* toSend, user* userlist)
     cout << " Write the userID of the user that you want to contact" << endl;
     printf(" > ");
     cin >> toSend->userId;
+    if(toSend->userId==loggedUser_id){
+        cout << " You cannot chat with yourself " << endl;
+        return -1;
+    }
     peer_id = toSend->userId;
     peer_username = getUsernameFromID(peer_id, userlist);
-    cout << " dbg " << endl;
+    cout << " dbg: I want to contact " << peer_username << endl;
     if(peer_username.empty())
         return -1;
     return 0;
@@ -343,6 +347,102 @@ int print_list_users(user* userlist)
 }
 
 /**
+ * @brief Retrieve the plaintext from the encrypted message
+ * 
+ * @param ciphertext ciphertext
+ * @param ct_len ciphertext length
+ * @param plaintext plaintext 
+ * @return Return plaintext len or -1 in case of error
+ */
+int open_msg_by_client(unsigned char* ciphertext, uint32_t ct_len, unsigned char** plaintext)
+{
+    uint32_t header_len = sizeof(uint32_t)+IV_DEFAULT+TAG_DEFAULT; 
+    //cout << " DBG - header_len: " << header_len << endl;
+    uint32_t pt_len;
+    int ret;
+ 
+    unsigned char* header = (unsigned char*)malloc(header_len);
+    if(!header){
+        cerr << " Error in malloc for header " << endl; 
+        return -1;
+    }
+
+    memcpy(header, ciphertext, header_len);
+
+    unsigned char* iv = (unsigned char*)malloc(IV_DEFAULT);
+    if(!iv){
+        cerr << " Error in malloc for iv " << endl; 
+        free(header);
+        return -1;
+    }
+    unsigned char* tag = (unsigned char*)malloc(TAG_DEFAULT);
+    if(!tag){
+        cerr << " Error in malloc for tag " << endl; 
+        free(header);
+        free(iv);
+        return -1;
+    }
+
+    // Open header
+    memcpy((void*)&ct_len, header, sizeof(uint32_t));
+    cout << " ct_len :" << endl;
+    BIO_dump_fp(stdout, (const char*)&ct_len, sizeof(uint32_t));
+
+    memcpy(iv, header+sizeof(uint32_t), IV_DEFAULT);
+    cout << " iv :" << endl;
+    BIO_dump_fp(stdout, (const char*)iv, IV_DEFAULT);
+
+    memcpy(tag, header+sizeof(uint32_t)+IV_DEFAULT, TAG_DEFAULT);
+    cout << " tag " << endl;
+    BIO_dump_fp(stdout, (const char*)tag, TAG_DEFAULT);
+
+    unsigned char* aad = (unsigned char*)malloc(sizeof(uint32_t));
+    if(!aad){
+        cerr << " Error in aad malloc " << endl;
+        free(ciphertext);
+        free(header);
+        free(tag);
+        free(iv);
+        return -1;
+    }
+    memcpy(aad, header, sizeof(uint32_t));
+    cout << " AAD : " << endl;
+    BIO_dump_fp(stdout, (const char*)aad, sizeof(uint32_t));
+
+    pt_len = auth_enc_decrypt(ciphertext, ct_len, aad, sizeof(uint32_t), session_key_clientToClient, tag, iv, plaintext);
+    if(pt_len == 0 || pt_len!=ct_len){
+        cerr << " Error during decryption " << endl;
+        free(ciphertext);
+        free(*plaintext);
+        free(header);
+        free(tag);
+        free(iv);
+        return -1;
+    }
+    // cout << " ciphertext is: " << endl;
+    // BIO_dump_fp(stdout, (const char*)ciphertext, ct_len);
+    cout << " plaintext is " << endl;
+    BIO_dump_fp(stdout, (const char*)*plaintext, pt_len);
+    free(ciphertext);
+    free(header);
+    free(tag);
+    free(iv);
+
+    // check seq number
+    uint32_t sequece_number = ntohl(*(uint32_t*) (*plaintext));
+    cout << " received sequence number " << sequece_number  << " aka " << *(uint32_t*) (*plaintext) << endl;
+    cout << " Expected sequence number " << receive_counter << endl;
+    if(sequece_number<receive_counter){
+        cerr << " Error: wrong seq number " << endl;
+        safe_free(*plaintext,pt_len);
+        return -1;
+    }
+    receive_counter=sequece_number+1;
+
+    return pt_len;
+}
+
+/**
  * @brief Receive in a secure way the messages sent by the server, decipher it and return the plaintext in the correspodent parameter. It
  * also control the sequence number
  * 
@@ -481,6 +581,84 @@ int recv_secure(int socket, unsigned char** plaintext)
 }
 
 /**
+ * @brief Prepare the message for the client. The plaintext is safely free inside the function
+ * 
+ * @param plaintext 
+ * @param pt_len 
+ * @param msg_to_send 
+ * @return The length of msg_to_send, 0 if error(s)
+ */
+int prepare_msg_for_client(unsigned char* pt, uint32_t pt_len, unsigned char** msg_to_send)
+{
+    int ret;
+    uchar *tag, *iv, *ct, *aad;
+
+    uint aad_len;
+    log("Plaintext to send:");
+    BIO_dump_fp(stdout, (const char*)pt, pt_len);
+    uint32_t header_len = sizeof(uint32_t)+IV_DEFAULT+TAG_DEFAULT;
+
+    // adding sequence number
+    uint32_t counter_n=htonl(send_counter);
+    cout <<" adding sequrnce number " << counter_n<<endl;
+    uchar* pt_seq = (uchar*)malloc(pt_len+sizeof(uint32_t));
+    if(!pt_seq){
+        safe_free(pt, pt_len);
+        return 0;
+    }
+
+    memcpy(pt_seq , &counter_n, sizeof(uint32_t));
+    memcpy(pt_seq+ sizeof(uint32_t), pt, pt_len);
+    pt=pt_seq;
+    pt_len+=sizeof(uint32_t);
+    log("Plaintext to send (with seq):");
+    BIO_dump_fp(stdout, (const char*)pt, pt_len);
+
+    int aad_ct_len_net = htonl(pt_len); //Since we use GCM ciphertext == plaintext
+    int ct_len = auth_enc_encrypt(pt, pt_len, (uchar*)&aad_ct_len_net, sizeof(uint), session_key_clientToClient, &tag, &iv, &ct);
+    if(ct_len == 0){
+        log("auth_enc_encrypt failed");
+        safe_free(pt, pt_len);
+        free(iv);
+        free(tag);
+        free(ct);
+        free(pt_seq);
+        return 0;
+    }
+    log("ct_len: " + to_string(ct_len)); 
+    uint msg_to_send_len = ct_len + header_len, bytes_copied = 0;
+    *msg_to_send = (uchar*)malloc(msg_to_send_len);
+    if(!(*msg_to_send)){
+        errorHandler(MALLOC_ERR);
+        safe_free(pt, pt_len);
+        free(iv);
+        free(tag);
+        free(ct);
+        free(pt_seq);
+        return 0;
+    }
+
+    cout << aad_ct_len_net << " -> " << ntohl(aad_ct_len_net) << endl;
+    memcpy((*msg_to_send) + bytes_copied, &aad_ct_len_net, sizeof(uint));
+    bytes_copied += sizeof(uint);
+    memcpy((*msg_to_send) + bytes_copied, iv, IV_DEFAULT);
+    bytes_copied += IV_DEFAULT;
+    memcpy((*msg_to_send) + bytes_copied, tag, TAG_DEFAULT);
+    bytes_copied += TAG_DEFAULT;
+    memcpy((*msg_to_send) + bytes_copied, ct, ct_len);
+    bytes_copied += sizeof(uint);
+
+    BIO_dump_fp(stdout, (const char*)(*msg_to_send), bytes_copied);
+
+    safe_free(pt, pt_len);
+    free(iv);
+    free(tag);
+    free(ct);
+    return bytes_copied;
+}
+
+
+/**
  * @brief Perform an authenticated encryption and then a send operation - add also the sequence number at the head of the plaintext
  * 
  * @param comm_socket_id socket id
@@ -501,24 +679,37 @@ int send_secure(int comm_socket_id, uchar* pt, int pt_len){
     uint32_t counter_n=htonl(send_counter);
     cout <<" adding sequrnce number " << counter_n<<endl;
     uchar* pt_seq = (uchar*)malloc(pt_len+sizeof(uint32_t));
+    if(!pt_seq){
+        safe_free(pt, pt_len);
+        return 0;
+    }
     memcpy(pt_seq , &counter_n, sizeof(uint32_t));
     memcpy(pt_seq+ sizeof(uint32_t), pt, pt_len);
     pt=pt_seq;
     pt_len+=sizeof(uint32_t);
-    log("Plaintext to send (with seq):");
+    printf("Plaintext to send (with seq):");
     BIO_dump_fp(stdout, (const char*)pt, pt_len);
-
+    cout << " pt_len -> " << pt_len << endl;
     int aad_ct_len_net = htonl(pt_len); //Since we use GCM ciphertext == plaintext
     int ct_len = auth_enc_encrypt(pt, pt_len, (uchar*)&aad_ct_len_net, sizeof(uint), session_key_clientToServer, &tag, &iv, &ct);
     if(ct_len == 0){
-        log("auth_enc_encrypt failed");
+        printf("auth_enc_encrypt failed");
+        free(iv);
+        free(tag);
+        free(ct);
+        free(pt_seq);
         return 0;
     }
-    log("ct_len: " + to_string(ct_len)); 
+    cout << "ct_len: " << to_string(ct_len) << endl; 
     uint msg_to_send_len = ct_len + header_len, bytes_copied = 0;
     uchar* msg_to_send = (uchar*)malloc(msg_to_send_len);
     if(!msg_to_send){
         errorHandler(MALLOC_ERR);
+        free(iv);
+        free(tag);
+        free(ct);
+        free(pt_seq);
+        safe_free(pt, pt_len);
         return 0;
     }
 
@@ -537,25 +728,34 @@ int send_secure(int comm_socket_id, uchar* pt, int pt_len){
 
     //-----------------------------------------------------------
     // Controllo encr/decr
-    unsigned char* pt_test = NULL;
+   /* unsigned char* pt_test = NULL;
     int pt_len_test = auth_enc_decrypt(ct, ct_len, (uchar*)&aad_ct_len_net, sizeof(uint32_t), session_key_clientToServer, tag, iv, &pt_test);
     if(pt_len_test == 0){
         log("auth_enc_decrypt failed");
         return 0;
     }
-    cout << " plaintext " << endl;
-    BIO_dump_fp(stdout, (const char*)pt_test, pt_len_test);
+    cout << " plaintext " << endl;*/
+    //BIO_dump_fp(stdout, (const char*)pt_test, pt_len_test);
     safe_free(pt, pt_len);
     //------------------------------------------------------
     ret = send(comm_socket_id, msg_to_send, msg_to_send_len, 0);
     if(ret <= 0 || ret != msg_to_send_len){
         errorHandler(SEND_ERR);
+        free(iv);
+        free(tag);
+        free(ct);
+        free(pt_seq);
         safe_free(msg_to_send, msg_to_send_len);
         return 0;
     }
     send_counter++;
     cout << " DBG - message sent " << endl;
     safe_free(msg_to_send, msg_to_send_len);
+
+    free(iv);
+    free(tag);
+    free(ct);
+    //free(pt_seq);
     return 1;
 }
 
@@ -605,34 +805,50 @@ int send_command_to_server(int sock_id, commandMSG* cmdToSend)
  * 
  * @param sock_id socket id
  * @param msgToSend data structure that contains the info for the message
- * @return int 
+ * @return -1 in case of error, 0 otherwise
  */
 int send_message(int sock_id, genericMSG* msgToSend)
 {
-    unsigned char* msg = (unsigned char*)malloc(msgToSend->length+sizeof(uint8_t)+sizeof(uint16_t));
-    if(!msg)
+    unsigned char* msgInternalPart = NULL; // nonce for client + msg for client
+    uint32_t msgInternalPart_len = prepare_msg_for_client(msgToSend->payload, msgToSend->length, &msgInternalPart);
+    if(msgInternalPart_len==0)
         return -1;
+    uint32_t msg_len = msgInternalPart_len+sizeof(uint8_t)+sizeof(uint32_t);
+    unsigned char* msg = (unsigned char*)malloc(msg_len);
+    if(!msg){
+        safe_free(msgInternalPart, msgInternalPart_len);
+        return -1;
+    }
 
+    cout << " internal message prepared " << endl;
     int bytes_allocated = 0;
-    uint16_t net_peer_user_id = htons(msgToSend->user_id_recipient);
-    uint16_t net_len = htons(msgToSend->length);
+    
+    uint32_t net_peer_user_id = htonl(peer_id);
     memcpy((void*)msg, &(msgToSend->opcode), sizeof(uint8_t));
     bytes_allocated += sizeof(uint8_t);
-    memcpy((void*)(msg+bytes_allocated), &(net_peer_user_id), sizeof(uint16_t));
-    bytes_allocated += sizeof(uint16_t);
-    memcpy((void*)(msg+bytes_allocated), &(net_len), sizeof(uint16_t));
-    bytes_allocated += sizeof(uint16_t);
-    memcpy((void*)(msg+bytes_allocated), (void*)(msgToSend->payload), (msgToSend->length));
-    bytes_allocated += msgToSend->length;
+    memcpy((void*)(msg+bytes_allocated), &(net_peer_user_id), sizeof(uint32_t));
+    bytes_allocated += sizeof(uint32_t);
+    memcpy((void*)(msg+bytes_allocated), msgInternalPart, msgInternalPart_len);
+    bytes_allocated += msgInternalPart_len;
 
     BIO_dump_fp(stdout, (const char*)msg, bytes_allocated);
 
-    int ret = send(sock_id, (void*)msg, bytes_allocated, 0);
-    if(ret < 0 || ret!=bytes_allocated)
-        return -1;
+    if(bytes_allocated!=msg_len)
+        cout << " qualcsoa non va " << endl;
 
-    free(msgToSend->payload);
-    free(msg);
+    //int ret = send_secure(sock_id, msg, msg_len);
+    
+    int ret = send_secure(sock_id, msgToSend->payload, msgToSend->length);
+    if(ret==0){
+        cerr << " send secure failed " << endl;
+        safe_free(msgInternalPart, msgInternalPart_len);
+        safe_free(msg, msg_len);
+        return -1;
+    }
+
+    // safe_free(msgToSend->payload, msgToSend->length); Free inside prepare_msg_for_client
+    safe_free(msgInternalPart, msgInternalPart_len);
+    safe_free(msg, msg_len);
 
     return 0;
 }
@@ -644,31 +860,23 @@ int send_message(int sock_id, genericMSG* msgToSend)
  * @param msg string where the received message is inserted
  * @return int -1 id error, 0 otherwise
  */
-int receive_message(int sock_id, string& msg) // TO DO IN A SECURE WAY
+int receive_message(int sock_id, string& msg)
 {
-    log("Receive_message");
-    uint16_t peer_user_id;
-    int ret = recv(sock_id, (void*)&peer_user_id, sizeof(uint16_t), 0); 
-    if(ret <= 0)
-        return -1;
-    
-    uint16_t msg_size;
-    ret = recv(sock_id, (void*)&msg_size, sizeof(uint16_t), 0); 
-    if(ret <= 0)
-        return -1;
+    printf("Receive_message\n");
 
-    uint16_t host_msg_size = ntohs(msg_size);
-
-    // CONTROLLA MSG SIZE PER OVERFLOW
-    char* msg_vector = (char*)malloc(host_msg_size);
-    if(!msg_vector)
+    unsigned char* msgCtForMe = NULL;
+    int msgCtForMe_len = recv_secure(sock_id, &msgCtForMe);
+    if(msgCtForMe_len<=0){
         return -1;
+    }
 
-    ret = recv(sock_id, (void*)msg_vector, host_msg_size, 0); 
-    if(ret <= 0)
+    unsigned char* pt = NULL;
+    uint32_t pt_len = open_msg_by_client(msgCtForMe, msgCtForMe_len, &pt);
+    if(pt_len<=0){
         return -1;
+    }
 
-    msg = (string)msg_vector;
+    msg = (string)((char*)pt);
     return 0;
 }
 
@@ -1829,6 +2037,7 @@ int commandHandler(string userInput){
             
         case STOP_CHAT:
             cmdToSend.opcode = STOP_CHAT;
+            isChatting = false;
             break;
             
         case NOT_VALID_CMD:
@@ -1855,8 +2064,8 @@ int commandHandler(string userInput){
         *          CHAT SECTION
         * *****************************************/
         msgGenToSend.opcode = CHAT_RESPONSE;
-        msgGenToSend.user_id_recipient = peer_id; //TODO: see if it's okay to add this
-        log("Peer_id: " + to_string(peer_id) + ", id_recipient: " + to_string(msgGenToSend.user_id_recipient));
+       // msgGenToSend.user_id_recipient = peer_id; //TODO: see if it's okay to add this
+       // log("Peer_id: " + to_string(peer_id) + ", id_recipient: " + to_string(msgGenToSend.user_id_recipient));
         msgGenToSend.length = userInput.size()+1; //+1 for the null terminator
         msgGenToSend.payload = (unsigned char*)malloc(msgGenToSend.length);
         if(!msgGenToSend.payload) {
@@ -1881,7 +2090,7 @@ int commandHandler(string userInput){
             commandMSG stopAll;
             stopAll.opcode = STOP_CHAT;
             // I sent to the server a message to close the coms, then I close the application
-            send_command_to_server(sock_id, &stopAll);
+            //send_command_to_server(sock_id, &stopAll);
             error = true;
             errorHandler(SEND_ERR);
             return -1;
@@ -2044,6 +2253,11 @@ int arriveHandler(int sock_id){
             return -1;
         }
     break;
+    case STOP_CHAT:
+        isChatting = false;
+        free(peer_pub_key);
+        cout << " Chat terminated by " << peer_username << endl;
+        break;
     default:{
         error = true;
         cout << " DBG - opcode: " << (uint16_t)op << endl;
@@ -2171,7 +2385,7 @@ int main(int argc, char* argv[])
                     ret = commandHandler(userInput);
                     if(ret<0){
                         error = true;
-                        perror("cin");
+                        //perror("cin");
                         errorHandler(GEN_ERR);
                         goto close_all;
                     }
@@ -2213,12 +2427,17 @@ close_all:
     if(msgGenToSend.payload)
         free(msgGenToSend.payload);
 
-    free(peer_pub_key);
-    safe_free(session_key_clientToClient, session_key_clientToClient_len);
-    free(server_cert);
-    safe_free(session_key_clientToServer, session_key_clientToServer_len);
+    if(peer_pub_key)
+        free(peer_pub_key);
+    if(session_key_clientToClient)
+        safe_free(session_key_clientToClient, session_key_clientToClient_len);
+    if(server_cert)
+        free(server_cert);
+    if(session_key_clientToServer)
+        safe_free(session_key_clientToServer, session_key_clientToServer_len);
 
-    free_list_users(user_list);
+    if(user_list)
+        free_list_users(user_list);
     close(sock_id);
     
     if(error) {
