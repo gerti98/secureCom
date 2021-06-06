@@ -35,9 +35,7 @@ typedef void (*sighandler_t)(int);
 */
 struct user_info {
     string username;
-    int socket_id;
-    // string msg_queue_key;
-    // int to_relay_user_id;  // -1 in case of nothing or user_id of the peer who set the request to chat
+    int socket_id; 
 };
 
 
@@ -145,7 +143,25 @@ void print_user_data_store(){
 user_info* get_user_datastore_copy(){
     sem_t* sem_id= sem_open(sem_user_store_name, O_CREAT, 0600, 1);
     sem_enter(sem_id);
+    int ret;
+    char buf;
+    //Update the user datastore
+    // user_info* user_status_to_update = (user_info*)shmem;
+    // for(int i=0; i<REGISTERED_USERS; i++){
+    //     if(user_status_to_update[i].socket_id != -1){
+    //         // int old_conf = fcntl(user_status_to_update[i].socket_id, F_GETFL, 0); 
+    //         // fcntl(user_status_to_update[i].socket_id,F_SETFL, old_conf | O_NONBLOCK);
+    //         // ret = recv(user_status_to_update[i].socket_id,&buf,1,MSG_PEEK);
+    //         // fcntl(user_status_to_update[i].socket_id,F_SETFL, old_conf);
+    //         int error = 0;
+    //         socklen_t len = sizeof(error);
+    //         int retval = getsockopt(user_status_to_update[i].socket_id, SOL_SOCKET, SO_ERROR, &error, &len);
+    //         log("("+ to_string(i) + ")Error: " + to_string(error) + ", retval: " + to_string(retval));
 
+    //         if(retval == -1)
+    //             user_status_to_update[i].socket_id = -1;
+    //     }
+    // }
     //Obtain a copy of the user datastore    
     user_info* user_status = (user_info*)malloc(REGISTERED_USERS*sizeof(user_info));
     if(!user_status)
@@ -219,16 +235,9 @@ void prior_cleanup(){
     msgid = msgget(key, 0666 | IPC_CREAT);
     struct msqid_ds buf;
     msgctl(msgid, IPC_STAT, &buf);
-    // cout << "Current # of bytes on queue 	" << buf.__msg_cbytes << endl;
-    cout << "Current # of messages on queue	" << buf.msg_qnum << endl;
-    cout << "Maximum # of bytes on queue 	" << buf.msg_qbytes << endl;
-    buf.msg_qbytes = 16384;
+    buf.msg_qbytes = 1000000;
     int ret = msgctl(msgid, IPC_SET, &buf);
-    msgctl(msgid, IPC_STAT, &buf);
-    cout << "Current # of bytes on queue 	" << buf.__msg_cbytes << endl;
-    cout << "Current # of messages on queue	" << buf.msg_qnum << endl;
-    cout << "Maximum # of bytes on queue 	" << buf.msg_qbytes << endl;
-    log("change size queue: " + to_string(ret));
+    // log("change size queue: " + to_string(ret));
 }
 
 // ---------------------------------------------------------------------
@@ -239,8 +248,10 @@ void prior_cleanup(){
  *  Send message to message queue of to_user_id
  *  @return 0 in case of success, -1 in case of error
  */
-int relay_write(int to_user_id, msg_to_relay msg){
+int relay_write(uint to_user_id, msg_to_relay msg){
     log("Entering relay_write for " + to_string(to_user_id));
+    if(to_user_id >= REGISTERED_USERS)
+        return -1;
 
     msg.type = to_user_id + 1;
     
@@ -262,6 +273,9 @@ int relay_write(int to_user_id, msg_to_relay msg){
  * @return -1 if no message has been read otherwise return the bytes copied
  **/
 int relay_read(int user_id, msg_to_relay& msg, bool blocking){
+    if(user_id >= REGISTERED_USERS)
+        return -1;
+    
     if(blocking)
         alarm(0);
 
@@ -344,23 +358,19 @@ void signal_handler(int sig)
             log("Sent to client : ");    
             BIO_dump_fp(stdout, (const char*)msg_to_send, msg_len);
             free(msg_to_send);
-        // } else if(opcode == CHAT_RESPONSE){
-        //     uint16_t msg_length_net, msg_length;
-        //     memcpy(&msg_length_net, (void*)(relay_msg.buffer + 3), sizeof(uint16_t));
-        //     msg_length = ntohs(msg_length_net);
+        } else if(opcode == STOP_CHAT){
+            int msg_length = 5;
+
+            // Send reply of the peer to the client
+            ret = send_secure(comm_socket_id, (uchar*)relay_msg.buffer, msg_length);
+            if(ret == 0){
+                errorHandler(SEND_ERR);
+                exit(1);
+            }       
+            log("Sent to client : ");    
+            BIO_dump_fp(stdout, (const char*)relay_msg.buffer, msg_length);
+
             
-        //     log("MSG LENGTH: " + msg_length);
-        //     uint16_t total_plaintext_len = msg_length + 5;
-
-        //     // Send reply of the peer to the client
-        //     ret = send_secure(comm_socket_id, (uchar*)relay_msg.buffer, total_plaintext_len);
-        //     if(ret == 0){
-        //         errorHandler(SEND_ERR);
-        //         exit(1);
-        //     }
-
-        //     log("Sent to client (pt): ");    
-        //     BIO_dump_fp(stdout, (const char*)relay_msg.buffer, total_plaintext_len);
         } else {
             log("OPCODE not recognized (" + to_string(opcode) + ")");
         }
@@ -504,6 +514,7 @@ int recv_secure(int comm_socket_id, unsigned char** plaintext)
     ret = recv(comm_socket_id, (void*)header, header_len, 0);
     if(ret <= 0 || ret != header_len){
         cerr << " Error in header reception " << ret << endl;
+        close(comm_socket_id);
         BIO_dump_fp(stdout, (const char*)header, header_len);
         safe_free(tag, TAG_DEFAULT);
         safe_free(header, header_len);
