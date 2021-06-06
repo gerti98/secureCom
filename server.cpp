@@ -52,7 +52,6 @@ msg_to_relay relay_msg;
 //Parameters of connection
 const char *srv_ipv4 = "127.0.0.1";
 const int srv_port = 4242;
-int peer_user_id_to_exchange;
 void* server_privk;
 
 uchar* session_key;
@@ -79,35 +78,65 @@ void* create_shared_memory(ssize_t size){
 // ---------------------------------------------------------------------
 // FUNCTIONS for accessing to the USER DATASTORE
 // ---------------------------------------------------------------------
-/**
- * @return -1: username not present, 0: successfully written socket data
- */
 
-void sem_enter(sem_t* sem_id){
+
+/**
+ * @brief prologue for granting mutual exclusion by using named semaphore sem_id
+ * @return -1 in case of errors, 0 otherwise
+ */
+int sem_prologue(sem_t* sem_id){
     vlog("sem_enter");
-    if(sem_id == SEM_FAILED)
-        errorHandler(SEM_OPEN_ERR);
-    if(sem_wait(sem_id) < 0)
-        errorHandler(SEM_WAIT_ERR);
+    if(sem_id == nullptr){
+        log("sem_prologue: nullptr found");    
+        return -1;
+    }
+    if(sem_id == SEM_FAILED){
+        log("SEM_FAILED");
+        return -1;
+    }
+    if(-1 == sem_wait(sem_id)){
+        log("ERROR on sem_wait");
+        return -1;
+    }
+    return 0;
 }
 
-void sem_exit(sem_t* sem_id){
+/**
+ * @brief epilogue for granting mutual exclusion by using named semaphore sem_id
+ * @return -1 in case of errors, 0 otherwise
+ */
+int sem_epilogue(sem_t* sem_id){
     vlog("sem_exit");
-    if(sem_post(sem_id) < 0)
-        errorHandler(SEM_POST_ERR);
-    if(sem_close(sem_id) < 0)
-        errorHandler(SEM_CLOSE_ERR);
+    if(sem_id == nullptr){
+        log("sem_epilogue: nullptr found");    
+        return -1;
+    }
+    if(-1 == sem_post(sem_id)){
+        log("ERROR on sem_exit");
+        return -1;
+    }
+    if(-1 == sem_close(sem_id)){
+        log("ERROR on sem_close");
+        return -1;
+    }
+    return 0;
 }
 
 
 /**
  * @brief test socket of communication in the user data store
- * @return return 0 if username not found, 1 otherwise
+ * @return return -1 in case of errors, 0 otherwise
  */
 int set_user_socket(string username, int socket){
-
+    if(socket < 0){ //Sanitization
+        log("SOCKET fd invalid"); //since file descriptors can have only values >= 0
+        return -1;
+    }
     sem_t* sem_id= sem_open(sem_user_store_name, O_CREAT, 0600, 1);
-    sem_enter(sem_id);
+    if(-1 == sem_prologue(sem_id)){
+        log("ERROR on sem_prologue");
+        return -1;
+    }
     
     user_info* user_status = (user_info*)shmem;
     int found = 0;
@@ -120,59 +149,91 @@ int set_user_socket(string username, int socket){
         }
     }
 
-    sem_exit(sem_id);
+    if(-1 == sem_epilogue(sem_id)){
+        log("ERROR on sem_epilogue");
+        return -1;
+    }
     return found;
 }
 
+
+/**
+ * @brief prints content of user datastore for debugging purposes
+ */
 void print_user_data_store(){
     sem_t* sem_id= sem_open(sem_user_store_name, O_CREAT, 0600, 1);
-    sem_enter(sem_id);
+    if(-1 == sem_prologue(sem_id)){
+        log("ERROR on sem_prologue");
+        return;
+    }
     
     user_info* user_status = (user_info*)shmem;
-    cout << "****** USER STATUS *******" << endl;
+    cout << "\n\n****** USER STATUS *******\n\n" << endl;
     for(int i=0; i<REGISTERED_USERS; i++){
         cout << "[" << i << "] " << user_status[i].username << " | " << user_status[i].socket_id << " | " << " | "  << ((user_status[i].socket_id==-1)?"offline":"online") << endl;
     }
+    cout << "\n\n**************************\n\n" << endl;
 
-    sem_exit(sem_id);
+    if(-1 == sem_epilogue(sem_id)){
+        log("ERROR on sem_epilogue");
+        return;
+    }
 }
 
 /**
- * Need to free return value of this function 
+ * @brief obtain a copy of the user datastore
+ * @return the copy of the user datastore, nullptr in case of errors
  */
 user_info* get_user_datastore_copy(){
     sem_t* sem_id= sem_open(sem_user_store_name, O_CREAT, 0600, 1);
-    sem_enter(sem_id);
+    if(-1 == sem_prologue(sem_id)){
+        log("ERROR on sem_prologue");
+        return nullptr;
+    }
     int ret;
     char buf;
     //Obtain a copy of the user datastore    
     user_info* user_status = (user_info*)malloc(REGISTERED_USERS*sizeof(user_info));
-    if(!user_status)
-        errorHandler(MALLOC_ERR);
+    if(!user_status){
+        log("ERROR on malloc");
+        return nullptr;
+    }
     memcpy(user_status, shmem, REGISTERED_USERS*sizeof(user_info));
 
-    sem_exit(sem_id);
+    if(-1 == sem_epilogue(sem_id)){
+        log("ERROR on sem_epilogue");
+        return nullptr;
+    }
     return user_status;
 }
 
 
-//Hardcoded content due to the fact that users are already registered
-void initialize_user_info(user_info* user_status){
+/**
+ * @brief initialize content of user datastore which is used to simulate a database
+ * @return 0 in case of errors, 1 in case of success
+ */
+int initialize_user_info(user_info* user_status){
+    if(user_status == nullptr){
+        return 0;
+    }
     vector<string> usernames {"alice", "bob", "charlie", "dave", "ethan"};
 
     for(int i=0; i < REGISTERED_USERS; i++){
         user_status[i].username = usernames[i];
-        // user_status[i].msg_queue_key = usernames[i] + "_queue";
         user_status[i].socket_id = -1;
-        // user_status[i].to_relay_user_id = -1;
     }
+
+    return 1;
 }
 
 
 int get_user_id_by_username(string username){
     log("Entering get id by username");
     sem_t* sem_id= sem_open(sem_user_store_name, O_CREAT, 0600, 1);
-    sem_enter(sem_id);
+    if(-1 == sem_prologue(sem_id)){
+        log("ERROR on sem_prologue");
+        return -1;
+    }
     
     int ret = -1;
     user_info* user_status = (user_info*)shmem;
@@ -183,25 +244,38 @@ int get_user_id_by_username(string username){
             break;
         }
     }
-    sem_exit(sem_id);
+    if(-1 == sem_epilogue(sem_id)){
+        log("ERROR on sem_epilogue");
+        return -1;
+    }
     return ret;
 }
 
 
+
+/**
+ * @return username or "" in case of errors
+ */
 string get_username_by_user_id(size_t id){
-    log("Entering get username by id");
-    if(id >= REGISTERED_USERS){
+    vlog("get username by id");
+    if(id >= REGISTERED_USERS){ 
         log(" ERR - User_id not present");
         errorHandler(GEN_ERR);
     }
 
     sem_t* sem_id= sem_open(sem_user_store_name, O_CREAT, 0600, 1);
-    sem_enter(sem_id);
+    if(-1 == sem_prologue(sem_id)){
+        log("ERROR on sem_prologue");
+        return "";
+    }
 
     user_info* user_status = (user_info*)shmem;
     string username = user_status[id].username;
     log("Obtained username of " + username);
-    sem_exit(sem_id);
+    if(-1 == sem_epilogue(sem_id)){
+        log("ERROR on sem_epilogue");
+        return "";
+    }
     return username;
 }
 
@@ -211,16 +285,17 @@ string get_username_by_user_id(size_t id){
 void prior_cleanup(){
     sem_unlink(sem_user_store_name); //Remove traces of usage for older execution  
     key_t key = ftok(message_queue_name, 65); 
-    vlog("Key of ftok returned is " + to_string(key));
     int msgid = msgget(key, 0666 | IPC_CREAT);
-    vlog("msgid is " + to_string(msgid));
     msgctl(msgid, IPC_RMID, NULL);
     msgid = msgget(key, 0666 | IPC_CREAT);
+
+    //Add more space to buffer
     struct msqid_ds buf;
     msgctl(msgid, IPC_STAT, &buf);
     buf.msg_qbytes = 1000000;
     int ret = msgctl(msgid, IPC_SET, &buf);
-    // log("change size queue: " + to_string(ret));
+    msgctl(msgid, IPC_STAT, &buf);    
+    log("Message queue size: " + to_string(buf.msg_qbytes));
 }
 
 // ---------------------------------------------------------------------
@@ -232,23 +307,18 @@ void prior_cleanup(){
  *  @return 0 in case of success, -1 in case of error
  */
 int relay_write(uint to_user_id, msg_to_relay msg){
-    log("Entering relay_write for " + to_string(to_user_id));
     if(to_user_id >= REGISTERED_USERS)
         return -1;
-
+    
+    log("Entering relay_write for " + to_string(to_user_id));
     msg.type = to_user_id + 1;
     
-    //Write to the message queue
     key_t key = ftok(message_queue_name, 65); 
     vvlog("Key of ftok returned is " + to_string(key));
     int msgid = msgget(key, 0666 | IPC_CREAT);
     vvlog("msgid is " + to_string(msgid));
 
-    // log("Relaying: ");
-    // BIO_dump_fp(stdout, (const char*)msg.buffer, 600);
-
-    msgsnd(msgid, &msg, sizeof(msg_to_relay), 0);
-    return 0;
+    return msgsnd(msgid, &msg, sizeof(msg_to_relay), 0);
 }
 
 /**
@@ -256,14 +326,15 @@ int relay_write(uint to_user_id, msg_to_relay msg){
  * @return -1 if no message has been read otherwise return the bytes copied
  **/
 int relay_read(int user_id, msg_to_relay& msg, bool blocking){
-    if(user_id >= REGISTERED_USERS)
+    uint time_remained;
+    if(user_id >= REGISTERED_USERS || user_id < 0)
         return -1;
     
     if(blocking)
-        alarm(0);
+        time_remained = alarm(0);
 
     int ret = -1;
-    log("Entering relay_read of " + to_string(user_id) + " [" + (blocking? "blocking": "no_wait") + "]");
+    log("relay_read of user_id " + to_string(user_id) + " [" + (blocking? "blocking": "non blocking") + "]");
 
     //Read from the message queue
     key_t key = ftok(message_queue_name, 65); 
@@ -273,15 +344,16 @@ int relay_read(int user_id, msg_to_relay& msg, bool blocking){
     vlog("msgid is " + to_string(msgid));
     
     ret = msgrcv(msgid, &msg, sizeof(msg), user_id+1, (blocking? 0: IPC_NOWAIT));
-    if (ret == -1) {
+    if(ret == -1)
         log("read nothing");
+
+
+    if(blocking){
+        if(time_remained > 0)
+            alarm(time_remained);
+        else
+            alarm(RELAY_CONTROL_TIME);
     }
-
-    // log("Received: ");
-    // BIO_dump_fp(stdout, (const char*)msg.buffer, 100);
-
-    if(blocking)
-        alarm(RELAY_CONTROL_TIME);
     return ret;
 }
 
@@ -293,67 +365,80 @@ int relay_read(int user_id, msg_to_relay& msg, bool blocking){
 
 /**
  * @brief Handler that handles the SIG_ALARM, this represents the fact that every REQUEST_CONTROL_TIME the client must control for chat request
- * 
  * @param sig 
  */
 void signal_handler(int sig)
 {
-    // Se viene chiamato durante una comunicazione durante client e server rompe tutto perchè la listen legge un byte dal
-    // socket
     log("signal handler");
     int ret;
     uint8_t opcode;
+    int bytes_copied = relay_read(client_user_id, relay_msg, false);
+    uint msg_len;
 
-                
-    if(relay_read(client_user_id, relay_msg, false) != -1){
-        //memcpy(&opcode, relay_msg.buffer[0], sizeof(uint8_t));
+    if(bytes_copied > 0){
         opcode = relay_msg.buffer[0];
         log("Found request to relay with opcode: " + to_string(opcode));
         
         if(opcode == CHAT_CMD) {
-            int username_length, username_length_net;
+            uint username_length, username_length_net;
             memcpy(&username_length_net, (void*)(relay_msg.buffer + 5), sizeof(int));
             username_length = ntohl(username_length_net);
             log("USERNAME LENGTH: " + to_string(username_length));
-
-            int msg_length = 9 + username_length + PUBKEY_DEFAULT_SER;
+            
+            msg_len = 9 + username_length + PUBKEY_DEFAULT_SER;
 
             // Send reply of the peer to the client
-            ret = send_secure(comm_socket_id, (uchar*)relay_msg.buffer, msg_length);
+            ret = send_secure(comm_socket_id, (uchar*)relay_msg.buffer, msg_len);
             if(ret == 0){
-                errorHandler(SEND_ERR);
+                log("ERROR on send_secure");
+                close(comm_socket_id);
                 exit(1);
             }       
             log("Sent to client : ");    
-            BIO_dump_fp(stdout, (const char*)relay_msg.buffer, msg_length);
+            BIO_dump_fp(stdout, (const char*)relay_msg.buffer, msg_len); //TODO: rimuovi
+
         } else if(opcode == AUTH || opcode == CHAT_RESPONSE){
-            int msg_len;
             memcpy(&msg_len, relay_msg.buffer + 1, sizeof(int)); //Added len field
+            if(msg_len < 1){
+                log("ERROR: msg_len < 1");
+                close(comm_socket_id);
+                exit(1);
+            }
+
             uchar* msg_to_send = (uchar*)malloc(msg_len);
+            if(!msg_to_send){
+                log("ERROR on malloc");
+                close(comm_socket_id);
+                exit(1);
+            }
+
             msg_to_send[0] = opcode;
             memcpy(msg_to_send + 1, relay_msg.buffer + 5, msg_len - 1);
+
             ret = send_secure(comm_socket_id, (uchar*)msg_to_send, msg_len);
             if(ret == 0){
-                errorHandler(SEND_ERR);
+                log("ERROR on send_secure");
+                close(comm_socket_id);
                 free(msg_to_send);
                 exit(1);
             }       
+
             log("Sent to client : ");    
-            BIO_dump_fp(stdout, (const char*)msg_to_send, msg_len);
+            BIO_dump_fp(stdout, (const char*)msg_to_send, msg_len); //TODO: rimuovi
             free(msg_to_send);
         } else if(opcode == STOP_CHAT){
-            int msg_length = 5;
+            msg_len = 5;
 
             // Send reply of the peer to the client
-            ret = send_secure(comm_socket_id, (uchar*)relay_msg.buffer, msg_length);
+            ret = send_secure(comm_socket_id, (uchar*)relay_msg.buffer, msg_len);
             if(ret == 0){
-                errorHandler(SEND_ERR);
+                log("ERROR on send_secure");
+                close(comm_socket_id);
                 exit(1);
             }       
-            log("Sent to client : ");    
-            BIO_dump_fp(stdout, (const char*)relay_msg.buffer, msg_length);
 
-            
+            log("Sent to client : ");    
+            BIO_dump_fp(stdout, (const char*)relay_msg.buffer, msg_len); //TODO: rimuovi
         } else {
             log("OPCODE not recognized (" + to_string(opcode) + ")");
         }
@@ -649,8 +734,8 @@ int handle_client_authentication(string pwd_for_keys){
     log("M1 auth (2) Received username: " + client_username);
 
     ret = set_user_socket(client_username, comm_socket_id);
-    if(ret != 1){
-        cerr << "User not exist!" << endl;
+    if(ret == -1){
+        log("ERROR on set_user_socket");
         safe_free((uchar*)username, client_username_len);
         safe_free(R1, NONCE_SIZE);
         return -1;
@@ -1063,6 +1148,10 @@ int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& re
 
     unsigned char chat_cmd = CHAT_CMD;
     string client_username = get_username_by_user_id(client_user_id);
+    if(client_username.compare("") == 0){
+        log("ERROR on get_username_by_user_id");
+        return -1;
+    }
     int client_username_length = client_username.length();
     uint32_t client_username_length_net = htonl(client_username_length);
     uint32_t client_user_id_net = htonl(client_user_id);
@@ -1192,6 +1281,11 @@ int handle_chat_pos_neg(uchar* plaintext, uint8_t opcode){
     return 0;
 }
 
+
+/**
+ * @brief handles AUTH and CHAT_RESPONSE commands
+ * @return -1 in case of errors, 0 instead
+ */
 int handle_auth_and_msg(uchar* plaintext, uint8_t opcode, int plaintext_len){
     if(opcode == AUTH)
         log("\n\n Arrived AUTH (" + to_string(opcode) + ") command\n\n");
@@ -1216,94 +1310,35 @@ int handle_auth_and_msg(uchar* plaintext, uint8_t opcode, int plaintext_len){
     log("plain_len_without_seq: " + to_string(plain_len_without_seq));
     log("Relaying: ");
     BIO_dump_fp(stdout, relay_msg.buffer, offset_relay);
-    relay_write(peer_user_id, relay_msg);
-    return 0;
+
+    return relay_write(peer_user_id, relay_msg);
 }
-
-// /**
-//  * @brief Handle CHAT command by sending it to the proper server process of the peer
-//  * @return -1 in case of errors, 0 otherwise 
-//  */
-// int handle_msg(uchar* plaintext, int plaintext_len){
-//     log("\n\n *** Received MSG command ***\n");
-//     uint offset_plaintext = 5;
-//     uint offset_relay
-//     unsigned char cmd = CHAT_RESPONSE;
-//     int peer_user_id_net = *(int*)(plaintext + offset_plaintext);
-//     offset_plaintext += sizeof(int);
-//     int peer_user_id = ntohl(peer_user_id_net);
-//     memcpy((void*)(relay_msg.buffer), (void*)(plaintext + 4), plaintext_len - 4); //To skip the sequence number
-
-//     // uint16_t peer_user_id_net, msg_length_net;
-    
-//     // memcpy(&peer_user_id_net, (void*)(plaintext + offset_plaintext), sizeof(uint16_t));
-//     // offset_plaintext += sizeof(uint16_t);
-//     // memcpy(&msg_length_net, (void*)(plaintext + offset_plaintext), sizeof(uint16_t));
-//     // offset_plaintext += sizeof(uint16_t);
-//     // char* msg;
-//     // int ret = recv(comm_socket_id, (void *)&peer_user_id_net, sizeof(uint16_t), 0);
-//     // if (ret < 0)
-//     //     errorHandler(REC_ERR);
-//     // if (ret == 0){
-//     //     vlog("No message from the server");
-//     //     exit(1);
-//     // }
-//     // ret = recv(comm_socket_id, (void *)&msg_length_net, sizeof(uint16_t), 0);
-//     // if (ret < 0)
-//     //     errorHandler(REC_ERR);
-//     // if (ret == 0){
-//     //     vlog("No message from the server");
-//     //     exit(1);
-//     // }
-
-//     uint16_t peer_user_id = ntohs(peer_user_id_net);
-//     uint16_t msg_length = ntohs(msg_length_net);
-
-//     log("Peer user id: " + to_string(peer_user_id) + ", msg_length: " + to_string(msg_length));
-//     msg = (char*)malloc(msg_length);
-//     if(!msg)
-//         errorHandler(MALLOC_ERR);
-//     memcpy(msg, (void*)(plaintext + offset_plaintext), msg_length);
-//     offset_plaintext += msg_length;
-
-//     log("MSG to send for " +  to_string(peer_user_id) + " arrived ");
-
-//     int bytes_offset = 0;
-//     memcpy((void*)relay_msg.buffer, (void*)&cmd, sizeof(uint8_t));
-//     bytes_offset += sizeof(uint8_t);
-//     memcpy((void*)(relay_msg.buffer + bytes_offset), (void*)&peer_user_id_net, sizeof(uint16_t));
-//     bytes_offset += sizeof(uint16_t);
-//     memcpy((void*)(relay_msg.buffer + bytes_offset), (void*)&msg_length_net, sizeof(uint16_t));
-//     bytes_offset += sizeof(uint16_t);
-//     memcpy((void*)(relay_msg.buffer + bytes_offset), (void*)msg, msg_length);
-//     bytes_offset += msg_length;
-
-//     log("Relaying: ");
-//     BIO_dump_fp(stdout, relay_msg.buffer, bytes_offset);
-
-//     relay_write(peer_user_id, relay_msg);
-//     return 0;
-// }
 
 
 
 int main(){
     //Create shared memory for mantaining info about users
     prior_cleanup();
-    
-    
-    if(shmem == MAP_FAILED)
-        errorHandler(GEN_ERR);
+    int ret;
+    if(shmem == MAP_FAILED){
+        log("MMAP failed");
+        return 0;
+    }
     user_info user_status[REGISTERED_USERS];
-    initialize_user_info(user_status);
+    ret = initialize_user_info(user_status);
+    if(ret == 0){
+        log("ERROR on initialize_user_info");
+        return 0;
+    }
     memcpy(shmem, user_status, sizeof(user_info)*REGISTERED_USERS);
     
-
-    int ret;
-    int listen_socket_id;   //socket indexes
+    int listen_socket_id;                   //socket indexes
     struct sockaddr_in srv_addr, cl_addr;   //address informations
     pid_t pid;                              
-    string password_for_keys;
+    string password_for_keys;               
+    uchar msgOpcode;                        //where is received the opcode of the message
+    uchar* plaintext;                       //buffer to store the plaintext
+    int plain_len;
 
     // WE MAY WANT TO DISABLE ECHO
     cout << "Enter the password that will be used for reading the keys: ";
@@ -1317,33 +1352,46 @@ int main(){
     //Preparation of ip address struct
     memset(&srv_addr, 0, sizeof(srv_addr));
     listen_socket_id = socket(AF_INET, SOCK_STREAM, 0);
-    if (listen_socket_id == -1)
-        errorHandler(SOCK_ERR);
+    if (listen_socket_id == -1){
+        log("ERROR on socket");
+        return 0;
+    }
 
-    //For avoiding annoying Address already in use error 
+    //For avoiding annoying address already in use error 
     int option = 1;
     setsockopt(listen_socket_id, SOL_SOCKET, SO_REUSEADDR, &option, sizeof(option));
 
     //Configuration of server address
     srv_addr.sin_family = AF_INET;
     srv_addr.sin_port = htons(srv_port);
-    inet_pton(AF_INET, srv_ipv4, &srv_addr.sin_addr);
-    log("address struct preparation...");
+    if(-1 == inet_pton(AF_INET, srv_ipv4, &srv_addr.sin_addr)){
+        log("ERROR on inet_pton: ");
+        perror(strerror(errno));
+        return 0;
+    }
 
     if (-1 == bind(listen_socket_id, (struct sockaddr *)&srv_addr, sizeof(srv_addr))){
+        log("ERROR on bind: ");
         perror(strerror(errno));
-        errorHandler(BIND_ERR);
+        return 0;
     }
         
-    if (-1 == listen(listen_socket_id, SOCKET_QUEUE))
-        errorHandler(LISTEN_ERR);
-
+    if (-1 == listen(listen_socket_id, SOCKET_QUEUE)){
+        log("ERROR on listen: ");    
+        perror(strerror(errno));
+        return 0;
+    }
+        
     unsigned int len = sizeof(cl_addr);
     log("Socket is listening...");
 
-    while (true)
-    {
+    while (true){
         comm_socket_id = accept(listen_socket_id, (struct sockaddr *)&cl_addr, &len);
+        if(comm_socket_id == -1){
+            log("ERROR on accept");
+            return 0;
+        }
+
         pid = fork();
 
         if (pid == 0){
@@ -1360,29 +1408,28 @@ int main(){
 
             // Every REQUEST_CONTROL_TIME seconds a signal is issued to control if the server has sent
             // a chat request originated from another clientS 
-            signal(SIGALRM, signal_handler);
+            if(SIG_ERR == signal(SIGALRM, signal_handler)){
+                log("ERROR on signal");
+                return 0;
+            }
+
             alarm(RELAY_CONTROL_TIME);
 
             //Child process
             while (true){
-                uchar msgOpcode;
-                uchar* plaintext;
-                int plain_len;
+                
                 plain_len = recv_secure(comm_socket_id, &plaintext);
-                if(plain_len <= 0){
+                if(plain_len <= 4){
                     log("ERROR on recv_secure");
                     set_user_socket(get_username_by_user_id(client_user_id), -1);
                     close(comm_socket_id);
                     return -1;
                 }
-                msgOpcode = *(uchar*)(plaintext+4);
-                log("msgOpcode: " + to_string(msgOpcode));
-                
-                //Demultiplexing of opcode
+                msgOpcode = *(uchar*)(plaintext+4); //plaintext has at least 5 bytes of memory allocated
+            
                 switch (msgOpcode){
                 case ONLINE_CMD:
-                    ret = handle_get_online_users(comm_socket_id, plaintext);
-                    if(ret<0) {
+                    if(-1 == handle_get_online_users(comm_socket_id, plaintext)) {
                         log("Error on handle_get_online_users");
                         set_user_socket(get_username_by_user_id(client_user_id), -1);
                         close(comm_socket_id);
@@ -1391,8 +1438,7 @@ int main(){
                     break;
 
                 case CHAT_CMD:
-                    ret = handle_chat_request(comm_socket_id, client_user_id, relay_msg, plaintext);
-                    if(ret<0) {
+                    if(-1 == handle_chat_request(comm_socket_id, client_user_id, relay_msg, plaintext)) {
                         log("Error on handle_chat_request");
                         set_user_socket(get_username_by_user_id(client_user_id), -1);
                         close(comm_socket_id);
@@ -1403,8 +1449,7 @@ int main(){
                 case CHAT_POS: 
                 case CHAT_NEG:
                 case STOP_CHAT:
-                    ret = handle_chat_pos_neg(plaintext, msgOpcode);
-                    if(ret<0) {
+                    if(-1 == handle_chat_pos_neg(plaintext, msgOpcode)){
                         log("Error on handle_chat_pos_neg");
                         set_user_socket(get_username_by_user_id(client_user_id), -1);
                         close(comm_socket_id);
@@ -1422,17 +1467,16 @@ int main(){
                     }
                     break;
                 default:
-                    cout << "Command Not Valid" << endl;
+                    log("\n\n***** INVALID COMMAND *****\n\n");
                     break;
                 }
 
             }
         }
         else if (pid == -1){
-            errorHandler(FORK_ERR);
+            log("ERROR on fork");
             return 0;
         }
-
         close(comm_socket_id);
     }
 }
