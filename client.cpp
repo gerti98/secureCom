@@ -354,11 +354,15 @@ int print_list_users(user* userlist)
  * @param plaintext plaintext 
  * @return Return plaintext len or -1 in case of error
  */
-int open_msg_by_client(unsigned char* ciphertext, uint32_t ct_len, unsigned char** plaintext)
+int open_msg_by_client(unsigned char* ciphertext, uint32_t msgRecLen, unsigned char** plaintext)
 {
+    cout << " [DBG] - Involucro interno " << endl;
+    BIO_dump_fp(stdout, (const char*)ciphertext, msgRecLen);
+
     uint32_t header_len = sizeof(uint32_t)+IV_DEFAULT+TAG_DEFAULT; 
-    uint32_t read = 5; // because opcode and seq number read
-    //cout << " DBG - header_len: " << header_len << endl;
+    uint32_t read = 9; // because seq number, opcode and len already read
+    uint32_t ct_len;
+    cout << " [DBG] - header_len: " << header_len <<  endl;
     uint32_t pt_len;
     int ret;
  
@@ -369,6 +373,7 @@ int open_msg_by_client(unsigned char* ciphertext, uint32_t ct_len, unsigned char
     }
 
     memcpy(header, ciphertext+read, header_len);
+    read += header_len;
 
     unsigned char* iv = (unsigned char*)malloc(IV_DEFAULT);
     if(!iv){
@@ -388,6 +393,8 @@ int open_msg_by_client(unsigned char* ciphertext, uint32_t ct_len, unsigned char
     memcpy((void*)&ct_len, header, sizeof(uint32_t));
     cout << " ct_len :" << endl;
     BIO_dump_fp(stdout, (const char*)&ct_len, sizeof(uint32_t));
+    ct_len = ntohl(ct_len);
+    cout << " ct len " << ct_len << endl;
 
     memcpy(iv, header+sizeof(uint32_t), IV_DEFAULT);
     cout << " iv :" << endl;
@@ -412,13 +419,28 @@ int open_msg_by_client(unsigned char* ciphertext, uint32_t ct_len, unsigned char
 
     if(session_key_clientToClient==NULL){
         cerr << " Null key " << endl;
+        free(ciphertext);
+        free(header);
+        free(tag);
+        free(iv);
+        free(aad);
         return -1;
     }
-    cout << "ciao "<< endl;
-    if(ciphertext==NULL)
-        cout << " ct null" << endl;
-    
-    pt_len = auth_enc_decrypt(ciphertext, ct_len, aad, sizeof(uint32_t), session_key_clientToClient, tag, iv, plaintext);
+
+    unsigned char* toDecrypt = (unsigned char*)malloc(ct_len);
+    if(!aad){
+        cerr << " Error in toDecrypt malloc " << endl;
+        free(aad);
+        free(ciphertext);
+        free(header);
+        free(tag);
+        free(iv);
+        return -1;
+    }
+
+    memcpy(toDecrypt, ciphertext+read, ct_len);
+
+    pt_len = auth_enc_decrypt(toDecrypt, ct_len, aad, sizeof(uint32_t), session_key_clientToClient, tag, iv, plaintext);
     if(pt_len == 0 || pt_len!=ct_len){
         cerr << " Error during decryption " << endl;
         free(ciphertext);
@@ -431,7 +453,7 @@ int open_msg_by_client(unsigned char* ciphertext, uint32_t ct_len, unsigned char
     // cout << " ciphertext is: " << endl;
     // BIO_dump_fp(stdout, (const char*)ciphertext, ct_len);
     cout << " plaintext is " << endl;
-    BIO_dump_fp(stdout, (const char*)*plaintext, pt_len);
+    BIO_dump_fp(stdout, (const char*)(*plaintext), pt_len);
     free(ciphertext);
     free(header);
     free(tag);
@@ -441,14 +463,28 @@ int open_msg_by_client(unsigned char* ciphertext, uint32_t ct_len, unsigned char
     uint32_t sequece_number = ntohl(*(uint32_t*) (*plaintext));
     cout << " received sequence number " << sequece_number  << " aka " << *(uint32_t*) (*plaintext) << endl;
     cout << " Expected sequence number " << receive_counter << endl;
-    if(sequece_number<receive_counter){
+
+    // TO DO AGGIUNGERE SEQ NUMBER
+   /* if(sequece_number<receive_counter){
         cerr << " Error: wrong seq number " << endl;
         safe_free(*plaintext,pt_len);
         return -1;
-    }
+    }*/
     receive_counter=sequece_number+1;
 
-    return pt_len;
+    uint32_t msg_len = pt_len - sizeof(uint32_t);
+    unsigned char* risp = (unsigned char*)malloc(msg_len);
+    if(!risp)
+        return -1;
+
+    memcpy(risp, ((*plaintext)+sizeof(uint32_t)), msg_len);
+
+    safe_free((*plaintext), pt_len);
+
+    *plaintext = risp; 
+
+
+    return msg_len;
 }
 
 /**
@@ -566,9 +602,9 @@ int recv_secure(int socket, unsigned char** plaintext)
         free(iv);
         return -1;
     }
-    // cout << " ciphertext is: " << endl;
-    // BIO_dump_fp(stdout, (const char*)ciphertext, ct_len);
-    cout << " plaintext is " << endl;
+    cout << " [DBG] - ciphertext is: " << endl;
+    BIO_dump_fp(stdout, (const char*)ciphertext, ct_len);
+    cout << " [DBG] - plaintext is " << endl;
     BIO_dump_fp(stdout, (const char*)*plaintext, pt_len);
     free(ciphertext);
     free(header);
@@ -885,18 +921,12 @@ int receive_message(int sock_id, string& msg, unsigned char* msgReceived, uint32
 {
     printf("Receive_message\n");
 
-    //unsigned char* msgCtForMe = NULL;
-   // int msgCtForMe_len = recv_secure(sock_id, &msgCtForMe);
-    //if(msgCtForMe_len<=0){
-    //    return -1;
-    //}
-
     unsigned char* pt = NULL;
+    cout << "len msg received " << msgReceived_len << endl;
     uint32_t pt_len = open_msg_by_client(msgReceived, msgReceived_len, &pt);
     if(pt_len<=0){
         return -1;
     }
-
     msg = (string)((char*)pt);
     return 0;
 }
@@ -2292,7 +2322,8 @@ int arriveHandler(int sock_id){
     break;
     }
 
-    free(plaintext);
+    if(op!=CHAT_RESPONSE) 
+        free(plaintext);
     return 1;
 }
 
