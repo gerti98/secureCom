@@ -354,10 +354,15 @@ int print_list_users(user* userlist)
  * @param plaintext plaintext 
  * @return Return plaintext len or -1 in case of error
  */
-int open_msg_by_client(unsigned char* ciphertext, uint32_t ct_len, unsigned char** plaintext)
+int open_msg_by_client(unsigned char* ciphertext, uint32_t msgRecLen, unsigned char** plaintext)
 {
+    cout << " [DBG] - Involucro interno " << endl;
+    BIO_dump_fp(stdout, (const char*)ciphertext, msgRecLen);
+
     uint32_t header_len = sizeof(uint32_t)+IV_DEFAULT+TAG_DEFAULT; 
-    //cout << " DBG - header_len: " << header_len << endl;
+    uint32_t read = 9; // because seq number, opcode and len already read
+    uint32_t ct_len;
+    cout << " [DBG] - header_len: " << header_len <<  endl;
     uint32_t pt_len;
     int ret;
  
@@ -367,7 +372,8 @@ int open_msg_by_client(unsigned char* ciphertext, uint32_t ct_len, unsigned char
         return -1;
     }
 
-    memcpy(header, ciphertext, header_len);
+    memcpy(header, ciphertext+read, header_len);
+    read += header_len;
 
     unsigned char* iv = (unsigned char*)malloc(IV_DEFAULT);
     if(!iv){
@@ -387,6 +393,8 @@ int open_msg_by_client(unsigned char* ciphertext, uint32_t ct_len, unsigned char
     memcpy((void*)&ct_len, header, sizeof(uint32_t));
     cout << " ct_len :" << endl;
     BIO_dump_fp(stdout, (const char*)&ct_len, sizeof(uint32_t));
+    ct_len = ntohl(ct_len);
+    cout << " ct len " << ct_len << endl;
 
     memcpy(iv, header+sizeof(uint32_t), IV_DEFAULT);
     cout << " iv :" << endl;
@@ -409,7 +417,30 @@ int open_msg_by_client(unsigned char* ciphertext, uint32_t ct_len, unsigned char
     cout << " AAD : " << endl;
     BIO_dump_fp(stdout, (const char*)aad, sizeof(uint32_t));
 
-    pt_len = auth_enc_decrypt(ciphertext, ct_len, aad, sizeof(uint32_t), session_key_clientToClient, tag, iv, plaintext);
+    if(session_key_clientToClient==NULL){
+        cerr << " Null key " << endl;
+        free(ciphertext);
+        free(header);
+        free(tag);
+        free(iv);
+        free(aad);
+        return -1;
+    }
+
+    unsigned char* toDecrypt = (unsigned char*)malloc(ct_len);
+    if(!aad){
+        cerr << " Error in toDecrypt malloc " << endl;
+        free(aad);
+        free(ciphertext);
+        free(header);
+        free(tag);
+        free(iv);
+        return -1;
+    }
+
+    memcpy(toDecrypt, ciphertext+read, ct_len);
+
+    pt_len = auth_enc_decrypt(toDecrypt, ct_len, aad, sizeof(uint32_t), session_key_clientToClient, tag, iv, plaintext);
     if(pt_len == 0 || pt_len!=ct_len){
         cerr << " Error during decryption " << endl;
         free(ciphertext);
@@ -422,7 +453,7 @@ int open_msg_by_client(unsigned char* ciphertext, uint32_t ct_len, unsigned char
     // cout << " ciphertext is: " << endl;
     // BIO_dump_fp(stdout, (const char*)ciphertext, ct_len);
     cout << " plaintext is " << endl;
-    BIO_dump_fp(stdout, (const char*)*plaintext, pt_len);
+    BIO_dump_fp(stdout, (const char*)(*plaintext), pt_len);
     free(ciphertext);
     free(header);
     free(tag);
@@ -432,14 +463,28 @@ int open_msg_by_client(unsigned char* ciphertext, uint32_t ct_len, unsigned char
     uint32_t sequece_number = ntohl(*(uint32_t*) (*plaintext));
     cout << " received sequence number " << sequece_number  << " aka " << *(uint32_t*) (*plaintext) << endl;
     cout << " Expected sequence number " << receive_counter << endl;
-    if(sequece_number<receive_counter){
+
+    // TO DO AGGIUNGERE SEQ NUMBER
+   /* if(sequece_number<receive_counter){
         cerr << " Error: wrong seq number " << endl;
         safe_free(*plaintext,pt_len);
         return -1;
-    }
+    }*/
     receive_counter=sequece_number+1;
 
-    return pt_len;
+    uint32_t msg_len = pt_len - sizeof(uint32_t);
+    unsigned char* risp = (unsigned char*)malloc(msg_len);
+    if(!risp)
+        return -1;
+
+    memcpy(risp, ((*plaintext)+sizeof(uint32_t)), msg_len);
+
+    safe_free((*plaintext), pt_len);
+
+    *plaintext = risp; 
+
+
+    return msg_len;
 }
 
 /**
@@ -557,9 +602,9 @@ int recv_secure(int socket, unsigned char** plaintext)
         free(iv);
         return -1;
     }
-    // cout << " ciphertext is: " << endl;
-    // BIO_dump_fp(stdout, (const char*)ciphertext, ct_len);
-    cout << " plaintext is " << endl;
+    cout << " [DBG] - ciphertext is: " << endl;
+    BIO_dump_fp(stdout, (const char*)ciphertext, ct_len);
+    cout << " [DBG] - plaintext is " << endl;
     BIO_dump_fp(stdout, (const char*)*plaintext, pt_len);
     free(ciphertext);
     free(header);
@@ -615,6 +660,10 @@ int prepare_msg_for_client(unsigned char* pt, uint32_t pt_len, unsigned char** m
     BIO_dump_fp(stdout, (const char*)pt, pt_len);
 
     int aad_ct_len_net = htonl(pt_len); //Since we use GCM ciphertext == plaintext
+    if(session_key_clientToClient==NULL){
+        cerr << " Null key " << endl;
+        return 0;
+    }
     int ct_len = auth_enc_encrypt(pt, pt_len, (uchar*)&aad_ct_len_net, sizeof(uint), session_key_clientToClient, &tag, &iv, &ct);
     if(ct_len == 0){
         cerr << "auth_enc_encrypt failed" << endl;
@@ -639,14 +688,17 @@ int prepare_msg_for_client(unsigned char* pt, uint32_t pt_len, unsigned char** m
     }
 
     cout << aad_ct_len_net << " -> " << ntohl(aad_ct_len_net) << endl;
-    memcpy((*msg_to_send) + bytes_copied, &aad_ct_len_net, sizeof(uint));
-    bytes_copied += sizeof(uint);
+    memcpy((*msg_to_send) + bytes_copied, &aad_ct_len_net, sizeof(uint32_t));
+    bytes_copied += sizeof(uint32_t);
     memcpy((*msg_to_send) + bytes_copied, iv, IV_DEFAULT);
     bytes_copied += IV_DEFAULT;
     memcpy((*msg_to_send) + bytes_copied, tag, TAG_DEFAULT);
     bytes_copied += TAG_DEFAULT;
     memcpy((*msg_to_send) + bytes_copied, ct, ct_len);
-    bytes_copied += sizeof(uint);
+    bytes_copied += ct_len;
+
+    if(bytes_copied!=msg_to_send_len)
+        cerr << " errore " << bytes_copied << " " << msg_to_send_len << endl;
 
     cout << " [DBG] - Message Prepared: " << endl; 
     BIO_dump_fp(stdout, (const char*)(*msg_to_send), bytes_copied);
@@ -692,6 +744,10 @@ int send_secure(int comm_socket_id, uchar* pt, int pt_len){
     BIO_dump_fp(stdout, (const char*)pt, pt_len);
     cout << " pt_len -> " << pt_len << endl;
     int aad_ct_len_net = htonl(pt_len); //Since we use GCM ciphertext == plaintext
+    if(session_key_clientToServer==NULL){
+        cerr << " Null key " << endl;
+        return 0;
+    }
     int ct_len = auth_enc_encrypt(pt, pt_len, (uchar*)&aad_ct_len_net, sizeof(uint), session_key_clientToServer, &tag, &iv, &ct);
     if(ct_len == 0){
         cerr << "auth_enc_encrypt failed" << endl;
@@ -722,10 +778,10 @@ int send_secure(int comm_socket_id, uchar* pt, int pt_len){
     memcpy(msg_to_send + bytes_copied, tag, TAG_DEFAULT);
     bytes_copied += TAG_DEFAULT;
     memcpy(msg_to_send + bytes_copied, ct, ct_len);
-    bytes_copied += sizeof(uint);
+    bytes_copied += ct_len;
 
-    // log("Msg (authenticated and encrypted) to send, (copied " + to_string(bytes_copied) + " of " + to_string(msg_to_send_len) + "):");
-    // BIO_dump_fp(stdout, (const char*)msg_to_send, msg_to_send_len);
+    cout << "Msg (authenticated and encrypted) to send, (copied " << to_string(bytes_copied) << " of " << to_string(msg_to_send_len) << "):" << endl;
+    BIO_dump_fp(stdout, (const char*)msg_to_send, msg_to_send_len);
 
     //-----------------------------------------------------------
     // Controllo encr/decr
@@ -861,22 +917,16 @@ int send_message(int sock_id, genericMSG* msgToSend)
  * @param msg string where the received message is inserted
  * @return int -1 id error, 0 otherwise
  */
-int receive_message(int sock_id, string& msg)
+int receive_message(int sock_id, string& msg, unsigned char* msgReceived, uint32_t msgReceived_len)
 {
     printf("Receive_message\n");
 
-    unsigned char* msgCtForMe = NULL;
-    int msgCtForMe_len = recv_secure(sock_id, &msgCtForMe);
-    if(msgCtForMe_len<=0){
-        return -1;
-    }
-
     unsigned char* pt = NULL;
-    uint32_t pt_len = open_msg_by_client(msgCtForMe, msgCtForMe_len, &pt);
+    cout << "len msg received " << msgReceived_len << endl;
+    uint32_t pt_len = open_msg_by_client(msgReceived, msgReceived_len, &pt);
     if(pt_len<=0){
         return -1;
     }
-
     msg = (string)((char*)pt);
     return 0;
 }
@@ -1457,9 +1507,9 @@ int authentication(int sock_id, uint8_t ver)
     free(dh_server_pubkey);
     free(eph_dh_pubKey);
 
-
-    session_key_clientToServer = NULL;
-    session_key_clientToClient = NULL;
+    
+    /*session_key_clientToServer = NULL;
+    session_key_clientToClient = NULL;*/
     uint32_t keylen;
     if(ver==AUTH_CLNT_SRV)
         keylen = default_digest(secret, secret_len, &session_key_clientToServer);
@@ -2137,7 +2187,7 @@ int arriveHandler(int sock_id){
         return -1;
 
     memcpy(&op, plaintext+sizeof(uint32_t), sizeof(uint8_t));
-    cout << " opcode arrived : " << op << endl;
+    cout << " opcode arrived : " << (uint16_t)op << endl;
 
     // I read the first byte to understand which type of message the server is sending to me
     /*ret = recv(sock_id, (void*)&op, sizeof(uint8_t), 0);  
@@ -2228,7 +2278,7 @@ int arriveHandler(int sock_id){
     case CHAT_RESPONSE:
     {
         string message;
-        ret = receive_message(sock_id, message); // TO DO IN A SECURE WAY
+        ret = receive_message(sock_id, message, plaintext, pt_len);
         if(ret!=0) {
             error = true;
             perror("chat response");
@@ -2272,7 +2322,8 @@ int arriveHandler(int sock_id){
     break;
     }
 
-    free(plaintext);
+    if(op!=CHAT_RESPONSE) 
+        free(plaintext);
     return 1;
 }
 
