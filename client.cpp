@@ -836,9 +836,9 @@ int send_message(int sock_id, genericMSG* msgToSend)
     if(bytes_allocated!=msg_len)
         cout << " qualcsoa non va " << endl;
 
-    //int ret = send_secure(sock_id, msg, msg_len);
+    int ret = send_secure(sock_id, msg, msg_len);
     
-    int ret = send_secure(sock_id, msgToSend->payload, msgToSend->length);
+   // int ret = send_secure(sock_id, msgToSend->payload, msgToSend->length);
     if(ret==0){
         cerr << " send secure failed " << endl;
         safe_free(msgInternalPart, msgInternalPart_len);
@@ -1877,10 +1877,12 @@ int chatRequestHandler(unsigned char* plaintext)
 
     cout << " size: " << size_username << " aka " << ntohl(size_username) << endl;
     size_username = ntohl(size_username);
+    cout << size_username << endl;
+  
     //int real_size_username = ntohl(size_username);
     //cout << " size after ntohl " << real_size_username << endl;
     // Read username peer
-    counterpart = (unsigned char*)malloc(size_username);
+    counterpart = (unsigned char*)malloc(size_username+1); // +1 for string terminator
     if(!counterpart){
         cout << " DBG - malloc error for counterpart " << endl;
         alarm(REQUEST_CONTROL_TIME);
@@ -1896,6 +1898,7 @@ int chatRequestHandler(unsigned char* plaintext)
     }*/
     memcpy(counterpart, plaintext+bytes_read, size_username);
     bytes_read += size_username;
+    counterpart[size_username] = '\0';
     cout << " cp: " << counterpart << endl;
 
     // Read sender pubkey
