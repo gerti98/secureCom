@@ -145,23 +145,6 @@ user_info* get_user_datastore_copy(){
     sem_enter(sem_id);
     int ret;
     char buf;
-    //Update the user datastore
-    // user_info* user_status_to_update = (user_info*)shmem;
-    // for(int i=0; i<REGISTERED_USERS; i++){
-    //     if(user_status_to_update[i].socket_id != -1){
-    //         // int old_conf = fcntl(user_status_to_update[i].socket_id, F_GETFL, 0); 
-    //         // fcntl(user_status_to_update[i].socket_id,F_SETFL, old_conf | O_NONBLOCK);
-    //         // ret = recv(user_status_to_update[i].socket_id,&buf,1,MSG_PEEK);
-    //         // fcntl(user_status_to_update[i].socket_id,F_SETFL, old_conf);
-    //         int error = 0;
-    //         socklen_t len = sizeof(error);
-    //         int retval = getsockopt(user_status_to_update[i].socket_id, SOL_SOCKET, SO_ERROR, &error, &len);
-    //         log("("+ to_string(i) + ")Error: " + to_string(error) + ", retval: " + to_string(retval));
-
-    //         if(retval == -1)
-    //             user_status_to_update[i].socket_id = -1;
-    //     }
-    // }
     //Obtain a copy of the user datastore    
     user_info* user_status = (user_info*)malloc(REGISTERED_USERS*sizeof(user_info));
     if(!user_status)
@@ -665,7 +648,7 @@ int handle_client_authentication(string pwd_for_keys){
     string client_username(username);
     log("M1 auth (2) Received username: " + client_username);
 
-    ret = set_user_socket(client_username, comm_socket_id); //to test the client
+    ret = set_user_socket(client_username, comm_socket_id);
     if(ret != 1){
         cerr << "User not exist!" << endl;
         safe_free((uchar*)username, client_username_len);
@@ -1384,10 +1367,12 @@ int main(){
             while (true){
                 uchar msgOpcode;
                 uchar* plaintext;
-                uint plain_len;
+                int plain_len;
                 plain_len = recv_secure(comm_socket_id, &plaintext);
-                if(plain_len == 0){
-                    errorHandler(REC_ERR);
+                if(plain_len <= 0){
+                    log("ERROR on recv_secure");
+                    set_user_socket(get_username_by_user_id(client_user_id), -1);
+                    close(comm_socket_id);
                     return -1;
                 }
                 msgOpcode = *(uchar*)(plaintext+4);
@@ -1399,6 +1384,8 @@ int main(){
                     ret = handle_get_online_users(comm_socket_id, plaintext);
                     if(ret<0) {
                         log("Error on handle_get_online_users");
+                        set_user_socket(get_username_by_user_id(client_user_id), -1);
+                        close(comm_socket_id);
                         return 0;
                     }
                     break;
@@ -1407,6 +1394,8 @@ int main(){
                     ret = handle_chat_request(comm_socket_id, client_user_id, relay_msg, plaintext);
                     if(ret<0) {
                         log("Error on handle_chat_request");
+                        set_user_socket(get_username_by_user_id(client_user_id), -1);
+                        close(comm_socket_id);
                         return 0;
                     }
                     break;
@@ -1417,6 +1406,8 @@ int main(){
                     ret = handle_chat_pos_neg(plaintext, msgOpcode);
                     if(ret<0) {
                         log("Error on handle_chat_pos_neg");
+                        set_user_socket(get_username_by_user_id(client_user_id), -1);
+                        close(comm_socket_id);
                         return 0;
                     }
                     break;
@@ -1425,6 +1416,8 @@ int main(){
                     ret = handle_auth_and_msg(plaintext, msgOpcode, plain_len);
                     if(ret<0) {
                         log("Error on handle_msg");
+                        set_user_socket(get_username_by_user_id(client_user_id), -1);
+                        close(comm_socket_id);
                         return 0;
                     }
                     break;
