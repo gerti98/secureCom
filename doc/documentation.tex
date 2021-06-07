@@ -159,6 +159,11 @@ anything; if the server try to implement a "man in the middle" attack he will on
 because the protocol is protected by private key signatures. Also in this case, DH keys are discared after 
 the handshake, and future messages are numbered againts reply attacks.
 
+\section{Session Ending}
+In order to end a chat session, one of the two users may send a \texttt{STOP CHAT} command to the server; this
+command is forwarded to the other client, who will close the chat session by his side; in order to disconnect from the server, the user have to send the 
+\texttt{EXIT} command. In case one client stops without sending the \texttt{EXIT} command, the server will notice 
+it and will procede to close the session and (if necessary) relative chat session.
 
 
 \chapter{Implemetation}
@@ -285,6 +290,9 @@ because the attacker have to discover also the session key between a client and 
 \end{figure}
 
 
+\chapter{User Manual}
+\section{Login}
+\section{Chat}
 
 	
 %	\item A third solution can be adding a command to indicate that a client is available to receive chat request. Thus:
