@@ -2450,7 +2450,7 @@ int main(int argc, char* argv[])
 
             if (FD_ISSET(fileno(stdin), &fdlist)!=0) {
                 // The output must be read even if need_server_answer is false
-                cin >> userInput; // command from terminal arrived
+                getline(cin, userInput); // command from terminal arrived
                 if(!need_server_answer){
                     ret = commandHandler(userInput);
                     if(ret<0){
