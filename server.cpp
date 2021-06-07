@@ -65,7 +65,7 @@ void* create_shared_memory(ssize_t size);
 
 //Shared memory for storing data of users
 void* shmem = create_shared_memory(sizeof(user_info)*REGISTERED_USERS);
-int send_secure(int comm_socket_id, uchar* pt, int pt_len);
+int send_secure(int comm_socket_id, uchar* pt, uint pt_len);
 int recv_secure(int comm_socket_id, unsigned char** plaintext);
     
 void* create_shared_memory(ssize_t size){
@@ -414,6 +414,10 @@ void signal_handler(int sig)
             username_length = ntohl(username_length_net);
             log("USERNAME LENGTH: " + to_string(username_length));
             
+            if(username_length > UINT_MAX - 9 - PUBKEY_DEFAULT_SER){
+                log("ERROR: unsigned wrap");
+                return;
+            }
             msg_len = 9 + username_length + PUBKEY_DEFAULT_SER;
 
             // Send reply of the peer to the client
@@ -490,7 +494,12 @@ uint32_t send_counter=0;
  * @param pt: pointer to plaintext without sequence number
  * @return 1 in case of success, 0 in case of error 
  */
-int send_secure(int comm_socket_id, uchar* pt, int pt_len){
+int send_secure(int comm_socket_id, uchar* pt, uint pt_len){
+    if(pt_len < 0 || comm_socket_id < 0){
+        log("ERROR invalid parameters on send_secure");
+        return 0;
+    }
+
     int ret;
     uchar *tag, *iv, *ct, *aad;
     //alarm(0);
@@ -503,7 +512,12 @@ int send_secure(int comm_socket_id, uchar* pt, int pt_len){
     // adding sequence number
     uint32_t counter_n=htonl(send_counter);
     cout <<" adding sequrnce number " << send_counter << endl;
-    uchar* pt_seq = (uchar*)malloc(pt_len+sizeof(uint32_t));
+    if(pt_len > UINT_MAX - sizeof(uint32_t)){
+        log("ERROR: unsigned wrap");
+        return 0;
+    }
+
+    uchar* pt_seq = (uchar*)malloc(pt_len+sizeof(uint32_t)); 
     memcpy(pt_seq , &counter_n, sizeof(uint32_t));
     memcpy(pt_seq+ sizeof(uint32_t), pt, pt_len);
     pt=pt_seq;
@@ -511,13 +525,17 @@ int send_secure(int comm_socket_id, uchar* pt, int pt_len){
     log("Plaintext to send (with seq):");
     BIO_dump_fp(stdout, (const char*)pt, pt_len);
 
-    int aad_ct_len_net = htonl(pt_len); //Since we use GCM ciphertext == plaintext
-    int ct_len = auth_enc_encrypt(pt, pt_len, (uchar*)&aad_ct_len_net, sizeof(uint), session_key, &tag, &iv, &ct);
+    uint aad_ct_len_net = htonl(pt_len); //Since we use GCM ciphertext == plaintext
+    uint ct_len = auth_enc_encrypt(pt, pt_len, (uchar*)&aad_ct_len_net, sizeof(uint), session_key, &tag, &iv, &ct);
     if(ct_len == 0){
         log("auth_enc_encrypt failed");
         return 0;
     }
-    // log("ct_len: " + to_string(ct_len)); 
+    // log("ct_len: " + to_string(ct_len));
+    if(ct_len > UINT_MAX - header_len){
+        log("ERROR: unsigned wrap");
+        return 0;
+    } 
     uint msg_to_send_len = ct_len + header_len, bytes_copied = 0;
     uchar* msg_to_send = (uchar*)malloc(msg_to_send_len);
     if(!msg_to_send){
@@ -557,7 +575,11 @@ int send_secure(int comm_socket_id, uchar* pt, int pt_len){
         return 0;
     }
     send_counter++;
-    cout << " DBG - message sent " << endl;
+    if(send_counter == 0){
+        log("ERROR: unsigned wrap on SEND COUNTER");
+        return 0;
+    }
+
     safe_free(msg_to_send, msg_to_send_len);
     //alarm(RELAY_CONTROL_TIME);
     return 1;
@@ -577,10 +599,14 @@ uint32_t receive_counter=0;
  */
 int recv_secure(int comm_socket_id, unsigned char** plaintext)
 {
-    log(" DBG - SECURE RECEIVE ");
+    // if(comm_socket_id < 0){
+    //     log("INVALID parameters on recv_secure");
+    //     return -1;
+    // }
+
+    log(" SECURE RECEIVE ");
 
     uint32_t header_len = sizeof(uint32_t)+IV_DEFAULT+TAG_DEFAULT; 
-    cout << " DBG - header_len: " << header_len << endl;
     uint32_t ct_len;
     unsigned char* ciphertext = NULL;
     uint32_t pt_len;
@@ -622,16 +648,16 @@ int recv_secure(int comm_socket_id, unsigned char** plaintext)
 
     // Open header
     memcpy((void*)&ct_len, header, sizeof(uint32_t));
-    log(" ct_len :");
-    BIO_dump_fp(stdout, (const char*)&ct_len, sizeof(uint32_t));
+    // log(" ct_len :");
+    // BIO_dump_fp(stdout, (const char*)&ct_len, sizeof(uint32_t));
 
     memcpy(iv, header+sizeof(uint32_t), IV_DEFAULT);
-    log(" iv :");
-    BIO_dump_fp(stdout, (const char*)iv, IV_DEFAULT);
+    // log(" iv :");
+    // BIO_dump_fp(stdout, (const char*)iv, IV_DEFAULT);
 
     memcpy(tag, header+sizeof(uint32_t)+IV_DEFAULT, TAG_DEFAULT);
-    log(" tag :");
-    BIO_dump_fp(stdout, (const char*)tag, TAG_DEFAULT);
+    // log(" tag :");
+    // BIO_dump_fp(stdout, (const char*)tag, TAG_DEFAULT);
 
     unsigned char* aad = (unsigned char*)malloc(sizeof(uint32_t));
     if(!aad){
@@ -642,13 +668,13 @@ int recv_secure(int comm_socket_id, unsigned char** plaintext)
         return -1;
     }
     memcpy(aad, header, sizeof(uint32_t));
-    log(" AAD : ");
-    BIO_dump_fp(stdout, (const char*)aad, sizeof(uint32_t));
+    // log(" AAD : ");
+    // BIO_dump_fp(stdout, (const char*)aad, sizeof(uint32_t));
 
     // Receive ciphertext
-    cout << " DBG - ct_len before ntohl is " << ct_len << endl;
+    // cout << " DBG - ct_len before ntohl is " << ct_len << endl;
     ct_len = ntohl(ct_len);
-    cout << " DBG - ct_len real is " << ct_len << endl;
+    // cout << " DBG - ct_len real is " << ct_len << endl;
 
     ciphertext = (unsigned char*)malloc(ct_len);
     if(!ciphertext){
@@ -669,12 +695,12 @@ int recv_secure(int comm_socket_id, unsigned char** plaintext)
         safe_free(aad, sizeof(uint32_t));
         return -1;
     }
-    cout << " ciphertext is: " << endl;
-    BIO_dump_fp(stdout, (const char*)ciphertext, ct_len);
+    // cout << " ciphertext is: " << endl;
+    // BIO_dump_fp(stdout, (const char*)ciphertext, ct_len);
 
     // Decryption
-    cout<<"Session key:"<<endl;
-    BIO_dump_fp(stdout, (const char*) session_key, 32);
+    // cout<<"Session key:"<<endl;
+    // BIO_dump_fp(stdout, (const char*) session_key, 32); //TODO: remove
     pt_len = auth_enc_decrypt(ciphertext, ct_len, aad, sizeof(uint32_t), session_key, tag, iv, plaintext);
     if(pt_len == 0 || pt_len!=ct_len){
         cerr << " Error during decryption " << endl;
@@ -706,6 +732,11 @@ int recv_secure(int comm_socket_id, unsigned char** plaintext)
         return -1;
     }
     receive_counter=sequece_number+1;
+    if(receive_counter == 0){
+        log("ERROR: unsigned wrap on receive_counter");
+        return -1;
+    }
+
     //alarm(RELAY_CONTROL_TIME);
     return pt_len;
 }
@@ -713,7 +744,7 @@ int recv_secure(int comm_socket_id, unsigned char** plaintext)
 
 /**
  * @brief handle authentication with the client
- * @return user_id of the client or -1 if not present in the user store or in case of errors
+ * @return user_id of the client or -1  in case of errors
  */
 int handle_client_authentication(string pwd_for_keys){
     /*************************************************************
@@ -732,8 +763,8 @@ int handle_client_authentication(string pwd_for_keys){
         safe_free(R1, NONCE_SIZE);
         return -1;
     }
-    log("M1 auth (0) Received R1: ");
-    BIO_dump_fp(stdout, (const char*)R1, NONCE_SIZE);
+    // log("M1 auth (0) Received R1: ");
+    // BIO_dump_fp(stdout, (const char*)R1, NONCE_SIZE);
 
     uint32_t client_username_len;
     ret = recv(comm_socket_id, (void *)&client_username_len, sizeof(uint32_t), 0);
@@ -745,7 +776,7 @@ int handle_client_authentication(string pwd_for_keys){
     client_username_len = ntohl(client_username_len);
     log("M1 auth (1) Received username size: " + to_string(client_username_len));
 
-    char* username = (char*)malloc(client_username_len); //TODO: control size
+    char* username = (char*)malloc(client_username_len);
     if(!username){
         errorHandler(MALLOC_ERR);
         safe_free(R1, NONCE_SIZE);
@@ -769,14 +800,7 @@ int handle_client_authentication(string pwd_for_keys){
         return -1;
     }
 
-    ret = set_user_socket(client_username, comm_socket_id);
-    if(ret == -1){
-        log("ERROR on set_user_socket");
-        safe_free((uchar*)username, client_username_len);
-        safe_free(R1, NONCE_SIZE);
-        return -1;
-    }
-
+    
     safe_free((uchar*)username, client_username_len);
 
     /*************************************************************
@@ -802,8 +826,8 @@ int handle_client_authentication(string pwd_for_keys){
         safe_free(eph_pubkey_s, eph_pubkey_s_len);
         return -1;
     }
-    log("M2 auth (1) pubkey: ");
-    BIO_dump_fp(stdout, (const char*)eph_pubkey_s, eph_pubkey_s_len);
+    // log("M2 auth (1) pubkey: ");
+    // BIO_dump_fp(stdout, (const char*)eph_pubkey_s, eph_pubkey_s_len);
 
     //Generate nuance R2
     ret = random_generate(NONCE_SIZE, R2);
@@ -816,11 +840,11 @@ int handle_client_authentication(string pwd_for_keys){
         return -1;
     }
 
-    log("auth (2) R2: ");
-    BIO_dump_fp(stdout, (const char*)R2, NONCE_SIZE);
+    // log("auth (2) R2: ");
+    // BIO_dump_fp(stdout, (const char*)R2, NONCE_SIZE);
 
     //Get certificate of Server
-    FILE* cert_file = fopen("certification/SecureCom_cert.pem", "rb"); //TODO: Maybe it's wrong this file
+    FILE* cert_file = fopen("certification/SecureCom_cert.pem", "rb");
     if(!cert_file){
         log("Error on opening cert file");
         safe_free(R1, NONCE_SIZE);
@@ -841,8 +865,13 @@ int handle_client_authentication(string pwd_for_keys){
         safe_free(eph_pubkey_s, eph_pubkey_s_len);
         return -1;
     }
-    log("auth (3) certificate: ");
-    BIO_dump_fp(stdout, (const char*)certificate_ser, certificate_len);
+    // log("auth (3) certificate: ");
+    // BIO_dump_fp(stdout, (const char*)certificate_ser, certificate_len);
+
+    if(eph_pubkey_s_len > UINT_MAX - NONCE_SIZE*2){
+        log("ERROR: unsigned wrap");
+        return -1;
+    }
 
     uint M2_to_sign_length = (NONCE_SIZE*2) + eph_pubkey_s_len, M2_signed_length;
     uchar* M2_signed;
@@ -860,8 +889,8 @@ int handle_client_authentication(string pwd_for_keys){
     memcpy(M2_to_sign, R1, NONCE_SIZE);
     memcpy((void*)(M2_to_sign + NONCE_SIZE), R2, NONCE_SIZE);
     memcpy((void*)(M2_to_sign + (2*NONCE_SIZE)), eph_pubkey_s, eph_pubkey_s_len);
-    log("auth (4) M2_to_sign: ");
-    BIO_dump_fp(stdout, (const char*)M2_to_sign, M2_to_sign_length);
+    // log("auth (4) M2_to_sign: ");
+    // BIO_dump_fp(stdout, (const char*)M2_to_sign, M2_to_sign_length);
 
 
     ret = sign_document(M2_to_sign, M2_to_sign_length, server_privk,&M2_signed, &M2_signed_length);
@@ -876,36 +905,47 @@ int handle_client_authentication(string pwd_for_keys){
         return -1;
     }
     //Send M2 part by part
-    
-    uint M2_size = NONCE_SIZE + 3*sizeof(uint) + eph_pubkey_s_len + M2_signed_length + certificate_len;
+    if(eph_pubkey_s_len > UINT_MAX - 3*sizeof(uint) - M2_signed_length){
+        log("ERROR unsigned_wrap");
+        return -1;
+    }
+
+    if(certificate_len > UINT_MAX - 3*sizeof(uint) - eph_pubkey_s_len - M2_signed_length){
+        log("ERROR unsigned_wrap");
+        return -1;
+    }
+
+    uint M2_size = NONCE_SIZE + 3*sizeof(uint) + eph_pubkey_s_len + M2_signed_length + certificate_len; //TODO:wrap
     uint offset = 0;
     uchar* M2 = (uchar*)malloc(M2_size);
+    if(!M2){
+        log("ERROR on malloc");
+         safe_free(M2_to_sign, M2_to_sign_length);
+        safe_free(R1, NONCE_SIZE);
+        safe_free(R2, NONCE_SIZE);
+        safe_free_privkey(eph_privkey_s);
+        safe_free(eph_pubkey_s, eph_pubkey_s_len);
+        return -1;
+    }
     uint eph_pubkey_s_len_net = htonl(eph_pubkey_s_len);
     uint M2_signed_length_net = htonl(M2_signed_length);
     uint certificate_len_net = htonl(certificate_len);
     log("Copying");
     memcpy((void*)(M2 + offset), R2, NONCE_SIZE);
     offset += NONCE_SIZE;
-    log(to_string(offset));
     memcpy((void*)(M2 + offset), &eph_pubkey_s_len_net, sizeof(uint));
     offset += sizeof(uint);
-    log(to_string(offset));
     memcpy((void*)(M2 + offset), eph_pubkey_s, eph_pubkey_s_len);
     offset += eph_pubkey_s_len;
-    log(to_string(offset));
     memcpy((void*)(M2 + offset), &M2_signed_length_net ,sizeof(uint));
     offset += sizeof(uint);
-    log(to_string(offset));
     memcpy((void*)(M2 + offset), M2_signed,M2_signed_length);
     offset += M2_signed_length;
-    log(to_string(offset));
     memcpy((void*)(M2 + offset), &certificate_len_net ,sizeof(uint));
     offset += sizeof(uint);
-    log(to_string(offset));
     memcpy((void*)(M2 + offset), certificate_ser, certificate_len);
     offset += certificate_len;
-    log(to_string(offset));
-
+    
     log("M2 size: " + to_string(M2_size));
     
     ret = send(comm_socket_id, M2, M2_size, 0);
@@ -918,8 +958,8 @@ int handle_client_authentication(string pwd_for_keys){
         safe_free(eph_pubkey_s, eph_pubkey_s_len);
         return -1;
     }
-    log("M2 sent");
-    BIO_dump_fp(stdout, (const char*)M2, offset);
+    // log("M2 sent");
+    // BIO_dump_fp(stdout, (const char*)M2, offset);
 
         
     safe_free(M2, M2_size);
@@ -953,14 +993,14 @@ int handle_client_authentication(string pwd_for_keys){
     }
 
     ret = recv(comm_socket_id, eph_pubkey_c, eph_pubkey_c_len, 0);
-    if(ret <= 0){
+    if(ret <= 0 || ret != eph_pubkey_c_len){
         errorHandler(REC_ERR);
         free(R2);
         free(eph_pubkey_c);
         return -1;
     }
-    log("M3 auth (2) pubkey_c:");
-    BIO_dump_fp(stdout, (const char*)eph_pubkey_c, eph_pubkey_c_len);
+    // log("M3 auth (2) pubkey_c:");
+    // BIO_dump_fp(stdout, (const char*)eph_pubkey_c, eph_pubkey_c_len);
 
     uint32_t m3_signature_len;
     ret = recv(comm_socket_id, &m3_signature_len, sizeof(uint32_t), 0);
@@ -1006,6 +1046,10 @@ int handle_client_authentication(string pwd_for_keys){
         return -1;
     }
 
+    if(eph_pubkey_c_len > UINT_MAX - NONCE_SIZE){
+        log("ERROR unsigned wrap");
+        return -1;
+    }
     uint m3_document_size = eph_pubkey_c_len + NONCE_SIZE;
     uchar* m3_document = (uchar*)malloc(m3_document_size);
     if(!m3_document){
@@ -1042,8 +1086,8 @@ int handle_client_authentication(string pwd_for_keys){
         safe_free(M3_signed, m3_signature_len);
         return -1;    
     }
-    log("Shared Secret!");
-    BIO_dump_fp(stdout, (const char*) shared_seceret, shared_seceret_len);
+    // log("Shared Secret!");
+    // BIO_dump_fp(stdout, (const char*) shared_seceret, shared_seceret_len); //TODO: remove
     session_key_len=default_digest(shared_seceret, shared_seceret_len, &session_key);
     if(session_key_len == 0){
         log("Failed digest computation of the secret");
@@ -1052,8 +1096,8 @@ int handle_client_authentication(string pwd_for_keys){
         safe_free(shared_seceret, shared_seceret_len);
         return -1;    
     }
-    log("Session key generated!");
-    BIO_dump_fp(stdout, (const char*) session_key, session_key_len);
+    // log("Session key generated!");
+    // BIO_dump_fp(stdout, (const char*) session_key, session_key_len);
     safe_free(eph_pubkey_c, eph_pubkey_c_len);
     safe_free(M3_signed, m3_signature_len);
     safe_free(shared_seceret, shared_seceret_len);
@@ -1062,25 +1106,25 @@ int handle_client_authentication(string pwd_for_keys){
     int client_user_id_net = htonl(client_user_id);
     log("Found username in the datastore with user_id " + to_string(client_user_id_net));
 
-
-    /*ret = send(comm_socket_id, (void*)&client_user_id_net, sizeof(int),0);
-    if(ret < sizeof(int)){
-        errorHandler(SEND_ERR);
+    //Set that user is online
+    ret = set_user_socket(client_username, comm_socket_id);
+    if(ret == -1){
+        log("ERROR on set_user_socket");
+        safe_free((uchar*)username, client_username_len);
+        safe_free(R1, NONCE_SIZE);
+        return -1;
     }
-    log("Sent to client: ");
-    BIO_dump_fp(stdout, (const char*)&client_user_id, ret);*/
-    
-    //Prova per send_secure
-    
+
+    //SEND User id
     uchar* userID_msg=(uchar*)malloc(5);
     *userID_msg=USRID;
     memcpy(userID_msg+1, &client_user_id_net,4);
-    ret = send_secure(comm_socket_id, userID_msg, sizeof(int)+1);
+    
+    ret = send_secure(comm_socket_id, userID_msg, 5);
     if(ret == 0){
         log("Error on send secure");
         return -1;
     }
-
 
     //Check if present in the user_datastore
     free(username);
@@ -1099,15 +1143,19 @@ int handle_client_authentication(string pwd_for_keys){
  *  @return 0 in case of success, -1 in case of error
  */
 int handle_get_online_users(int comm_socket_id, uchar* plaintext){
+    if(comm_socket_id < 0 || plaintext == nullptr){
+        log("Invalid input parameters on handle_get_online_users");
+        return -1;
+    }
+
     log("\n\n*** USERS_ONLINE opcode arrived ***\n");
     int ret;
     uint offset_reply = 0; 
     unsigned char online_cmd = ONLINE_CMD;
     user_info* user_datastore_copy = get_user_datastore_copy();
-    vlog("Obtained user datastore copy");
 
-    //Need to calculate how much space to allocate and send (strings have variable length fields)
-    int total_space_to_allocate = 9; //TODO: control this number
+    //Need to calculate how much space to allocate and send (limited users and username sizes in this context, can't overflow those values)
+    int total_space_to_allocate = 9; 
     int online_users = 0; //also num_pairs
     
     for(int i=0; i<REGISTERED_USERS; i++){
@@ -1172,6 +1220,11 @@ int handle_get_online_users(int comm_socket_id, uchar* plaintext){
  *  @return 0 in case of success, -1 in case of error
  */
 int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& relay_msg, uchar* plaintext){
+    if(comm_socket_id < 0 || client_user_id < 0 || client_user_id >= REGISTERED_USERS || plaintext == nullptr){
+        log("Invalid input parameters on handle_chat_request");
+        return -1;
+    }
+
     log("\n\n*** CHAT opcode arrived ***\n");
     uint offset_plaintext = 5; //From where data is good to read 
     uint offset_relay = 0;
@@ -1181,6 +1234,10 @@ int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& re
     memcpy(&peer_user_id_net,(const void*)(plaintext + offset_plaintext),sizeof(int));
     offset_plaintext += sizeof(int);
     int peer_user_id = ntohl(peer_user_id_net);
+    if(peer_user_id < 0 || peer_user_id >= REGISTERED_USERS){
+        log("ERROR: invalid value of peer user id in handle_chat_request");
+        return -1;
+    }
 
     unsigned char chat_cmd = CHAT_CMD;
     string client_username = get_username_by_user_id(client_user_id);
@@ -1188,13 +1245,13 @@ int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& re
         log("ERROR on get_username_by_user_id");
         return -1;
     }
+
     int client_username_length = client_username.length();
     uint32_t client_username_length_net = htonl(client_username_length);
     uint32_t client_user_id_net = htonl(client_user_id);
     const char* username = client_username.c_str();
     log(username);
     log("Request for chatting with user id " +  to_string(peer_user_id) + " arrived ");
-    // log("Username length is " + to_string(client_username_length) + " net: " + to_string(client_username_length_net));
 
     memcpy((void*)(relay_msg.buffer + offset_relay), (void*)&chat_cmd, 1);
     offset_relay += sizeof(uchar);
@@ -1217,8 +1274,6 @@ int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& re
     log("Pubkey ser len : " + to_string(pubkey_client_ser_len) + "(default: " + to_string(PUBKEY_DEFAULT_SER) + "), pubkey_ser:");
     BIO_dump_fp(stdout, (const char*)pubkey_client_ser, pubkey_client_ser_len);
 
-    // memcpy((void*)(relay_msg.buffer + offset_relay), &pubkey_client_ser_len, sizeof(int));
-    // offset_relay += sizeof(int);
     memcpy((void*)(relay_msg.buffer + offset_relay), (void*)pubkey_client_ser, pubkey_client_ser_len);
     offset_relay += pubkey_client_ser_len;
     
@@ -1231,8 +1286,9 @@ int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& re
         final_response_len = 5 + PUBKEY_DEFAULT_SER;
     log("Relaying: ");
     BIO_dump_fp(stdout, relay_msg.buffer, offset_relay);    
-    //If no other request of notification send the message to the other process through his message queue
     vlog("Handle chat request (2)");
+
+    //Handle case user is offline
     if(get_user_socket_by_user_id(peer_user_id) == -1){
         log("User: " + to_string(peer_user_id) + "is offline. Sending CHAT_NEG");
         uchar chat_cmd = CHAT_NEG;
@@ -1270,12 +1326,21 @@ int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& re
  * @return -1 in case of errors, 0 in case of success
  */
 int handle_chat_pos_neg(uchar* plaintext, uint8_t opcode){
+    if(plaintext == nullptr){
+        log("ERROR invalid parameter on handle_chat_pos_neg");
+        return -1;
+    }
+
     if(opcode == CHAT_POS)
         log("\n\n*** Received CHAT_POS command ***\n");
     else if(opcode == CHAT_NEG)
         log("\n\n*** Received CHAT_NEG command ***\n");
     else if(opcode == STOP_CHAT)
         log("\n\n*** Received STOP_CHAT command ***\n");
+    else{
+        log("invalid opcode on handle_chat_pos_neg");
+        return -1;
+    }
         
     
     uint offset_plaintext = 5;
@@ -1293,7 +1358,10 @@ int handle_chat_pos_neg(uchar* plaintext, uint8_t opcode){
     // }
 
     int peer_user_id = ntohl(peer_user_id_net);
-    
+    if(peer_user_id < 0 || peer_user_id >= REGISTERED_USERS){
+        log("INVALID peer_user_id on handle_chat_pos_neg");
+        return -1;
+    }
     log("Command to send for user_id " +  to_string(peer_user_id) + " arrived ");
     
 
@@ -1310,8 +1378,8 @@ int handle_chat_pos_neg(uchar* plaintext, uint8_t opcode){
             log("Unable to open pubkey of client");
             return -1;
         }
+        
         //Adding pubkey
-        //TODO: need to serialize certificate from file;
         uchar* pubkey_client_ser;
         int pubkey_client_ser_len = serialize_pubkey_from_file(pubkey_of_client_file, &pubkey_client_ser);
         log("Pubkey ser len : " + to_string(pubkey_client_ser_len) + "(default: " + to_string(PUBKEY_DEFAULT_SER) + "), pubkey_client_ser:");
@@ -1350,6 +1418,15 @@ int handle_auth_and_msg(uchar* plaintext, uint8_t opcode, int plaintext_len){
         log("\n\n Arrived AUTH (" + to_string(opcode) + ") command\n\n");
     else if(opcode == CHAT_RESPONSE) 
         log("\n\n Arrived CHAT_RESPONSE command\n\n");
+    else{
+        log("invalid opcode on handle_chat_pos_neg");
+        return -1;
+    }
+
+    if(plaintext_len < 5 || plaintext_len > RELAY_MSG_SIZE || plaintext == nullptr){
+        log("INVALID plaintext_len on handle_auth_and_msg");
+        return -1;
+    }
 
     uint offset_plaintext = 5;
     uint offset_relay = 0;
@@ -1490,8 +1567,10 @@ int main(){
             while (true){
                 
                 plain_len = recv_secure(comm_socket_id, &plaintext);
+
                 if(plain_len <= 4){
-                    log("ERROR on recv_secure");
+                    log("ERROR on recv_secure (at least seq num and opcode should be read) (" + to_string(plain_len) + ")");
+                    safe_free(session_key, session_key_len);
                     set_user_socket(get_username_by_user_id(client_user_id), -1);
                     close(comm_socket_id);
                     return -1;
@@ -1502,6 +1581,7 @@ int main(){
                 case ONLINE_CMD:
                     if(-1 == handle_get_online_users(comm_socket_id, plaintext)) {
                         log("Error on handle_get_online_users");
+                        safe_free(session_key, session_key_len);
                         set_user_socket(get_username_by_user_id(client_user_id), -1);
                         close(comm_socket_id);
                         return 0;
@@ -1511,6 +1591,7 @@ int main(){
                 case CHAT_CMD:
                     if(-1 == handle_chat_request(comm_socket_id, client_user_id, relay_msg, plaintext)) {
                         log("Error on handle_chat_request");
+                        safe_free(session_key, session_key_len);
                         set_user_socket(get_username_by_user_id(client_user_id), -1);
                         close(comm_socket_id);
                         return 0;
@@ -1522,6 +1603,7 @@ int main(){
                 case STOP_CHAT:
                     if(-1 == handle_chat_pos_neg(plaintext, msgOpcode)){
                         log("Error on handle_chat_pos_neg");
+                        safe_free(session_key, session_key_len);
                         set_user_socket(get_username_by_user_id(client_user_id), -1);
                         close(comm_socket_id);
                         return 0;
@@ -1532,6 +1614,7 @@ int main(){
                     ret = handle_auth_and_msg(plaintext, msgOpcode, plain_len);
                     if(ret<0) {
                         log("Error on handle_msg");
+                        safe_free(session_key, session_key_len);
                         set_user_socket(get_username_by_user_id(client_user_id), -1);
                         close(comm_socket_id);
                         return 0;
