@@ -123,12 +123,41 @@ int sem_epilogue(sem_t* sem_id){
 }
 
 
+
+/**
+ * @brief test socket of communication in the user data store
+ * @return return -1 in case the user is offline, -2 in case of errors, the socket_id otherwise
+ */
+int get_user_socket_by_user_id(int user_id){
+    if(user_id < 0 || user_id >= REGISTERED_USERS){
+        log("Invalid user id");
+        return -2;
+    }
+    sem_t* sem_id= sem_open(sem_user_store_name, O_CREAT, 0600, 1);
+    if(-1 == sem_prologue(sem_id)){
+        log("ERROR on sem_prologue");
+        return -2;
+    }
+    
+    user_info* user_status = (user_info*)shmem;
+    int socket_id = user_status[user_id].socket_id;
+
+    if(-1 == sem_epilogue(sem_id)){
+        log("ERROR on sem_epilogue");
+        return -2;
+    }
+
+    return socket_id;
+}
+
+
+
 /**
  * @brief test socket of communication in the user data store
  * @return return -1 in case of errors, 0 otherwise
  */
 int set_user_socket(string username, int socket){
-    if(socket < 0){ //Sanitization
+    if(socket < -1){ //Sanitization (-1 indicate tha the user will be offline)
         log("SOCKET fd invalid"); //since file descriptors can have only values >= 0
         return -1;
     }
@@ -426,7 +455,7 @@ void signal_handler(int sig)
             log("Sent to client : ");    
             BIO_dump_fp(stdout, (const char*)msg_to_send, msg_len); //TODO: rimuovi
             free(msg_to_send);
-        } else if(opcode == STOP_CHAT){
+        } else if(opcode == STOP_CHAT || opcode == CHAT_NEG){
             msg_len = 5;
 
             // Send reply of the peer to the client
@@ -732,6 +761,13 @@ int handle_client_authentication(string pwd_for_keys){
     }
     string client_username(username);
     log("M1 auth (2) Received username: " + client_username);
+    
+    if(get_user_socket_by_user_id(get_user_id_by_username(username)) != -1){
+        log("ERROR user already online");
+        safe_free((uchar*)username, client_username_len);
+        safe_free(R1, NONCE_SIZE);
+        return -1;
+    }
 
     ret = set_user_socket(client_username, comm_socket_id);
     if(ret == -1){
@@ -1197,6 +1233,18 @@ int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& re
     BIO_dump_fp(stdout, relay_msg.buffer, offset_relay);    
     //If no other request of notification send the message to the other process through his message queue
     vlog("Handle chat request (2)");
+    if(get_user_socket_by_user_id(peer_user_id) == -1){
+        log("User: " + to_string(peer_user_id) + "is offline. Sending CHAT_NEG");
+        uchar chat_cmd = CHAT_NEG;
+        offset_relay = 0; 
+        memcpy((void*)(relay_msg.buffer + offset_relay), (void*)&chat_cmd, 1);
+        offset_relay += sizeof(uchar);
+        memcpy((void*)(relay_msg.buffer + offset_relay), (void*)&peer_user_id_net, sizeof(int));
+        offset_relay += sizeof(int);
+        relay_write(client_user_id, relay_msg);
+        return 0;
+    }
+
     relay_write(peer_user_id, relay_msg);
 
     //Wait for response to the own named message queue (blocking)
@@ -1277,6 +1325,17 @@ int handle_chat_pos_neg(uchar* plaintext, uint8_t opcode){
     
     log("Relaying: ");
     BIO_dump_fp(stdout, relay_msg.buffer, offset_relay);
+    // if(get_user_socket_by_user_id(peer_user_id) == -1){
+    //     log("User: " + to_string(peer_user_id) + "is offline. Sending CHAT_NEG");
+    //     uchar chat_cmd = CHAT_NEG;
+    //     offset_relay = 0; 
+    //     memcpy((void*)(relay_msg.buffer + offset_relay), (void*)&chat_cmd, 1);
+    //     offset_relay += sizeof(uchar);
+    //     memcpy((void*)(relay_msg.buffer + offset_relay), (void*)&peer_user_id_net, sizeof(int));
+    //     offset_relay += sizeof(int);
+    //     relay_write(peer_user_id, relay_msg);
+    //     return 0;
+    // }
     relay_write(peer_user_id, relay_msg);
     return 0;
 }
@@ -1311,6 +1370,18 @@ int handle_auth_and_msg(uchar* plaintext, uint8_t opcode, int plaintext_len){
     log("Relaying: ");
     BIO_dump_fp(stdout, relay_msg.buffer, offset_relay);
 
+    //Control if user is offline
+    if(get_user_socket_by_user_id(peer_user_id) == -1){
+        log("User: " + to_string(peer_user_id) + "is offline. Sending STOP_CHAT");
+        uchar chat_cmd = STOP_CHAT;
+        offset_relay = 0; 
+        memcpy((void*)(relay_msg.buffer + offset_relay), (void*)&chat_cmd, 1);
+        offset_relay += sizeof(uchar);
+        memcpy((void*)(relay_msg.buffer + offset_relay), (void*)&peer_user_id_net, sizeof(int));
+        offset_relay += sizeof(int);
+        relay_write(client_user_id, relay_msg);
+        return 0;
+    }
     return relay_write(peer_user_id, relay_msg);
 }
 
