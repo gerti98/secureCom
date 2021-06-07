@@ -964,6 +964,35 @@ int retrieve_my_userID(int socket)
     return 0;
 }
 
+/**
+ * @brief Send a negative response to the server after a chat request
+ * 
+ * @param sock_id socket id
+ * @param refused_user id of the user rejected, it must be in network order
+ * @return -1 in case of error, 0 otherwise
+ */
+int automatic_neg_response(int sock_id, int refused_user)
+{
+    cout << " Automatic negative response " << endl;
+    uint32_t risp_buff_size = sizeof(uint8_t)+sizeof(int);
+    unsigned char* risp_buff = (unsigned char*)malloc(risp_buff_size);
+    if(!risp_buff)
+        return -1;
+            
+    uint8_t response = CHAT_NEG;
+    memcpy(risp_buff, (void*)&response, sizeof(uint8_t));
+    memcpy(risp_buff+1, (void*)&refused_user, sizeof(int));
+                
+    int ret = send_secure(sock_id, risp_buff, risp_buff_size);
+    if(ret==-1){
+        free(risp_buff);
+        return -1;
+    }
+
+    free(risp_buff);
+    return 0;
+}
+
 
 /**
  * @brief It performs the authentication procedure with the server or the client depending by the passed parameter
@@ -1098,12 +1127,31 @@ int authentication(int sock_id, uint8_t ver)
     cout << " DBG - Wait for M2" << endl;
     // wait for nonce
     if(ver==AUTH_CLNT_CLNT){
-        msg2_pt_len = recv_secure(sock_id, &msg2_pt);
-        if(msg2_pt_len==-1){
-            return -1;
-        }
+        uint8_t op_tmp;
+        uint32_t read_tmp;
+        do{
+            msg2_pt_len = recv_secure(sock_id, &msg2_pt);
+            if(msg2_pt_len==-1)
+                return -1;
+    
+            read_tmp = sizeof(uint32_t); // seq number read
+            memcpy(&op_tmp, msg2_pt+read_tmp, sizeof(uint8_t));
+            read_tmp += sizeof(uint8_t);
+            
+            if(op_tmp==CHAT_CMD){
+                // automatic refuse
+                int rejected_user;
+                memcpy(&rejected_user, msg2_pt+read_tmp, sizeof(uint32_t));
+                cout << " DBG - The user " << ntohl(rejected_user) << " wants to chat but I am busy " << endl;
+                automatic_neg_response(sock_id, rejected_user);
+            }
+            else if(op_tmp!=AUTH){
+                free(nonce);
+                return -1;
+            }
+        }while(op_tmp!=AUTH);
     }
-    uint32_t read_from_msg2 = sizeof(uint32_t); // seq number already read in recv_secure
+    uint32_t read_from_msg2 = sizeof(uint32_t) + sizeof(uint8_t); // seq number already read in recv_secure and opcode already handled
     
     server_nonce = (unsigned char*)malloc(NONCE_SIZE);
     if(!server_nonce){
@@ -1120,15 +1168,7 @@ int authentication(int sock_id, uint8_t ver)
         }
     }
     else if(ver==AUTH_CLNT_CLNT){
-        uint8_t op_tmp;
-        memcpy(&op_tmp, msg2_pt+read_from_msg2, sizeof(uint8_t));
-        read_from_msg2 += sizeof(uint8_t);
-        if(op_tmp!=AUTH){
-            free(server_nonce);
-            free(nonce);
-            return -1;
-        }
-        read_from_msg2 += sizeof(int);
+        read_from_msg2 += sizeof(int); // because of there is the user id but i am not interested in it
         memcpy(server_nonce, msg2_pt + read_from_msg2, NONCE_SIZE);
         read_from_msg2 += NONCE_SIZE;
     }
@@ -1570,15 +1610,43 @@ int authentication_receiver(int sock_id)
 
     unsigned char* pt_M1 = NULL;
     uint32_t pt_M1_len = 0;
-    pt_M1_len = recv_secure(sock_id, &pt_M1);
+   /* pt_M1_len = recv_secure(sock_id, &pt_M1);
     if(pt_M1_len<=0){
         cerr << " Error during M1 reception in authentication_receiver " << endl;
         safe_free(R1, NONCE_SIZE);
         return -1;
-    }
+    }*/
+
+    uint8_t op_tmp_checker;
+    uint32_t read_tmp_checker;
+    do{
+        pt_M1_len = recv_secure(sock_id, &pt_M1);
+        if(pt_M1_len<=0){
+            cerr << " Error during M1 reception in authentication_receiver " << endl;
+            safe_free(R1, NONCE_SIZE);
+            return -1;
+        }
     
+        read_tmp_checker = sizeof(uint32_t); // seq number read
+        memcpy(&op_tmp_checker, pt_M1+read_tmp_checker, sizeof(uint8_t));
+        read_tmp_checker += sizeof(uint8_t);
+            
+        if(op_tmp_checker==CHAT_CMD){
+            // automatic refuse
+            int rejected_user;
+            memcpy(&rejected_user, pt_M1+read_tmp_checker, sizeof(uint32_t));
+            cout << " DBG - The user " << ntohl(rejected_user) << " wants to chat but I am busy " << endl;
+             automatic_neg_response(sock_id, rejected_user);
+        }
+        else if(op_tmp_checker!=AUTH){
+            safe_free(R1, NONCE_SIZE);
+            return -1;
+        }
+    }while(op_tmp_checker!=AUTH);
+
     uint32_t bytes_read = sizeof(uint32_t); // Because sequence number already read in recv_secure
 
+    // Double check
     memcpy(&op_rec, pt_M1+bytes_read, sizeof(uint8_t));
     bytes_read += sizeof(uint8_t);
     if(op_rec!=AUTH){
@@ -1746,13 +1814,39 @@ int authentication_receiver(int sock_id)
     uint32_t eph_pubkey_c_len;
     unsigned char* msg3 = NULL;
     uint32_t msg3_len = 0;
-    msg3_len = recv_secure(sock_id, &msg3);
-    if(msg3_len <= 0){
+  //  msg3_len = recv_secure(sock_id, &msg3);
+/*if(msg3_len <= 0){
         cerr << " Error in recv_secure during M3 reception " << endl;
         safe_free(R2, NONCE_SIZE);
         safe_free_privkey(eph_privkey_s);
         return -1;
-    }
+    }*/
+    do{
+        msg3_len = recv_secure(sock_id, &msg3);
+       if(msg3_len <= 0){
+            cerr << " Error in recv_secure during M3 reception " << endl;
+            safe_free(R2, NONCE_SIZE);
+            safe_free_privkey(eph_privkey_s);
+            return -1;
+        }
+    
+        read_tmp_checker = sizeof(uint32_t); // seq number read
+        memcpy(&op_tmp_checker, msg3+read_tmp_checker, sizeof(uint8_t));
+        read_tmp_checker += sizeof(uint8_t);
+            
+        if(op_tmp_checker==CHAT_CMD){
+            // automatic refuse
+            int rejected_user;
+            memcpy(&rejected_user, msg3+read_tmp_checker, sizeof(uint32_t));
+            cout << " DBG - The user " << ntohl(rejected_user) << " wants to chat but I am busy " << endl;
+             automatic_neg_response(sock_id, rejected_user);
+        }
+        else if(op_tmp_checker!=AUTH){
+            safe_free(R1, NONCE_SIZE);
+            return -1;
+        }
+    }while(op_tmp_checker!=AUTH);
+    
 
     bytes_read = 4; // seq number already read in recv secure
 
@@ -1951,8 +2045,10 @@ int chatRequestHandler(unsigned char* plaintext)
 
     // Read sender pubkey
     // Public key of an old peer
-    if(peer_pub_key!=NULL)
+    if(peer_pub_key!=NULL){
         free(peer_pub_key);
+        peer_pub_key = NULL;
+    }
     peer_pub_key = (unsigned char*)malloc(PUBKEY_DEFAULT_SER);
     if(!peer_pub_key)
         return 0;    
@@ -1966,7 +2062,12 @@ int chatRequestHandler(unsigned char* plaintext)
         cout << " DBG - Automatic response because I am chatting " << endl;
         // Automatic response
         free(counterpart);
-        risp_buff_size = sizeof(uint8_t)+sizeof(int);
+
+        ret = automatic_neg_response(sock_id, id_cp);
+        if(ret==-1)
+            return 0;
+        
+        /*  risp_buff_size = sizeof(uint8_t)+sizeof(int);
         risp_buff = (unsigned char*)malloc(risp_buff_size);
         if(!risp_buff){
             //alarm(REQUEST_CONTROL_TIME);
@@ -1983,7 +2084,7 @@ int chatRequestHandler(unsigned char* plaintext)
             return 0;
         }
 
-        free(risp_buff);
+        free(risp_buff);*/
 
         //return 0;
         return 1;
@@ -2175,8 +2276,10 @@ int commandHandler(string userInput){
             return -1;
         }
         cout << " DBG - Command to server sent" << endl;
-        if(cmdToSend.opcode==STOP_CHAT)
+        if(cmdToSend.opcode==STOP_CHAT){
+            cout << " Chat terminated " << endl;
             return 1;
+        }
     }
     return 2;
 }
@@ -2263,6 +2366,7 @@ int arriveHandler(int sock_id){
         // Pub key of the peer
         if(peer_pub_key!=NULL){
             free(peer_pub_key); // old public key peer
+            peer_pub_key = NULL;
         }
         peer_pub_key = (unsigned char*)malloc(PUBKEY_DEFAULT_SER);
         if(!peer_pub_key){
@@ -2325,6 +2429,7 @@ int arriveHandler(int sock_id){
     case STOP_CHAT:
         isChatting = false;
         free(peer_pub_key);
+        peer_pub_key = NULL;
         cout << " Chat terminated by " << peer_username << endl;
         break;
     default:{
