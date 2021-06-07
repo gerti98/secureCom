@@ -830,24 +830,17 @@ int send_command_to_server(int sock_id, commandMSG* cmdToSend)
 {
     uint32_t net_id;
     unsigned char* pt = NULL;
-    uint32_t pt_len = (cmdToSend->opcode==CHAT_CMD)? sizeof(uint8_t)+sizeof(uint32_t) : sizeof(uint8_t);
-
+    uint32_t pt_len = (cmdToSend->opcode==CHAT_CMD || cmdToSend->opcode==STOP_CHAT)? sizeof(uint8_t)+sizeof(uint32_t) : sizeof(uint8_t);
     pt = (unsigned char*)malloc(pt_len);
     if(!pt)
         return -1;
 
-    /*int ret = send(sock_id,(void*)&cmdToSend->opcode, sizeof(uint8_t), 0);
-    if(ret < 0 || ret!=sizeof(uint8_t))
-        return -1;
-      */
-
     memcpy(pt, &(cmdToSend->opcode), sizeof(uint8_t));
 
-    if(cmdToSend->opcode==CHAT_CMD) {
+    if(cmdToSend->opcode==CHAT_CMD || cmdToSend->opcode==STOP_CHAT) {
+        if(cmdToSend->opcode==STOP_CHAT)
+            cmdToSend->userId = peer_id;
         net_id = htonl(cmdToSend->userId);
-        /*ret = send(sock_id,(void*)&net_id, sizeof(uint32_t), 0);
-        if(ret < 0 || ret!=sizeof(uint32_t))
-            return -1;*/
         memcpy(pt+sizeof(uint8_t), &net_id, sizeof(uint32_t));
     }
 
@@ -896,7 +889,7 @@ int send_message(int sock_id, genericMSG* msgToSend)
     BIO_dump_fp(stdout, (const char*)msg, bytes_allocated);
 
     if(bytes_allocated!=msg_len)
-        cout << " qualcsoa non va " << endl;
+        cout << " WARNING - Something is going wrong " << endl;
 
     int ret = send_secure(sock_id, msg, msg_len);
    // int ret = send_secure(sock_id, msgToSend->payload, msgToSend->length);
@@ -2136,6 +2129,7 @@ int commandHandler(string userInput){
         /* ****************************************
         *          CHAT SECTION
         * *****************************************/
+       cout << " chat section " << endl;
         msgGenToSend.opcode = CHAT_RESPONSE;
        // msgGenToSend.user_id_recipient = peer_id; //TODO: see if it's okay to add this
        // log("Peer_id: " + to_string(peer_id) + ", id_recipient: " + to_string(msgGenToSend.user_id_recipient));
@@ -2158,7 +2152,7 @@ int commandHandler(string userInput){
     * ********************************/
     if(isChatting && cmdToSend.opcode!=STOP_CHAT) {
         cout << " DBG - Sending message <" << msgGenToSend.payload << "> of length <" << msgGenToSend.length << " >" << endl;
-        ret = send_message(sock_id, &msgGenToSend); // TO DO IN SECURE WAY
+        ret = send_message(sock_id, &msgGenToSend);
         if(ret!=0){
             commandMSG stopAll;
             stopAll.opcode = STOP_CHAT;
@@ -2181,6 +2175,8 @@ int commandHandler(string userInput){
             return -1;
         }
         cout << " DBG - Command to server sent" << endl;
+        if(cmdToSend.opcode==STOP_CHAT)
+            return 1;
     }
     return 2;
 }
