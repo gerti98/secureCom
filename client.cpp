@@ -64,6 +64,8 @@ unsigned char* server_cert = NULL;
 // Counter for freshness
 uint32_t receive_counter=0;
 uint32_t send_counter=0;
+uint32_t receive_counter_client_client = 0;
+uint32_t send_counter_client_client = 0;
 
 //---------------- STRUCTURES ------------------//
 struct commandMSG
@@ -461,17 +463,17 @@ int open_msg_by_client(unsigned char* ciphertext, uint32_t msgRecLen, unsigned c
     free(iv);
 
     // check seq number
-    uint32_t sequece_number = ntohl(*(uint32_t*) (*plaintext));
-    cout << " received sequence number " << sequece_number  << " aka " << *(uint32_t*) (*plaintext) << endl;
-    cout << " Expected sequence number " << receive_counter << endl;
+    uint32_t sequence_number = ntohl(*(uint32_t*) (*plaintext));
+    cout << " received sequence number " << sequence_number  << " aka " << *(uint32_t*) (*plaintext) << endl;
+    cout << " Expected sequence number " << receive_counter_client_client << endl;
 
     // TO DO AGGIUNGERE SEQ NUMBER
-   /* if(sequece_number<receive_counter){
+    if(sequence_number<receive_counter_client_client){
         cerr << " Error: wrong seq number " << endl;
         safe_free(*plaintext,pt_len);
         return -1;
-    }*/
-    receive_counter=sequece_number+1;
+    }
+    receive_counter_client_client=sequence_number+1;
 
     uint32_t msg_len = pt_len - sizeof(uint32_t);
     unsigned char* risp = (unsigned char*)malloc(msg_len);
@@ -645,7 +647,7 @@ int prepare_msg_for_client(unsigned char* pt, uint32_t pt_len, unsigned char** m
     uint32_t header_len = sizeof(uint32_t)+IV_DEFAULT+TAG_DEFAULT;
 
     // adding sequence number
-    uint32_t counter_n=htonl(send_counter);
+    uint32_t counter_n=htonl(send_counter_client_client);
     cout <<" adding sequrnce number " << counter_n<<endl;
     uchar* pt_seq = (uchar*)malloc(pt_len+sizeof(uint32_t));
     if(!pt_seq){
@@ -708,6 +710,7 @@ int prepare_msg_for_client(unsigned char* pt, uint32_t pt_len, unsigned char** m
     free(iv);
     free(tag);
     free(ct);
+    send_counter_client_client++;
     return bytes_copied;
 }
 
