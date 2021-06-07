@@ -201,6 +201,7 @@ int chat(struct commandMSG* toSend, user* userlist)
  */
 void free_list_users(struct user* userlist)
 {
+    cout << " Free list of users " << endl;
     if(userlist==NULL)
         return;
 
@@ -1979,12 +1980,19 @@ int chatRequestHandler(unsigned char* plaintext)
         response = CHAT_NEG;
         memcpy(risp_buff, (void*)&response, sizeof(uint8_t));
         memcpy(risp_buff+1, (void*)&id_cp, sizeof(int));
-        ret = send(sock_id, (void*)risp_buff, risp_buff_size, 0);
-        free(risp_buff);
-        alarm(REQUEST_CONTROL_TIME);
-        return 0;
-    }
+        
+       ret = send_secure(sock_id, risp_buff, risp_buff_size);
+        if(ret==-1){
+            free(risp_buff);
+            return 0;
+        }
 
+        free(risp_buff);
+
+        //return 0;
+        return 1;
+    }
+    isChatting = true; // to avoid interference during this phase
     peer_id = ntohl(id_cp);
     peer_username = (char*)counterpart;
     cout << "\n **********************************************************" << endl;
@@ -1999,7 +2007,7 @@ int chatRequestHandler(unsigned char* plaintext)
         else    
             cout << " Wrong format - Please write y if you want to accept, n otherwise " << endl;
     }
-
+   
     risp_buff_size = sizeof(uint8_t)+sizeof(int);
     risp_buff = (unsigned char*)malloc(risp_buff_size);
     if(!risp_buff){
@@ -2026,19 +2034,27 @@ int chatRequestHandler(unsigned char* plaintext)
 
 
     // AUTENTICAZIONE CLIENT-CLIENT
-    ret = authentication_receiver(sock_id);
-    if(ret==-1){
-        cout << " Authentication with " << peer_username <<" failed " << endl;
+    if(response==CHAT_POS){
+        ret = authentication_receiver(sock_id);
+        if(ret==-1){
+            cout << " Authentication with " << peer_username <<" failed " << endl;
+            return 0;
+        }
+    }
+    else if(response==CHAT_NEG){
+        cout << " Chat refused " << endl;
+        isChatting = false;
+        return 1;
+    }
+    else{
+        cerr << " Something went wrong " << endl;
         return 0;
     }
-
-    isChatting = true;
-    cout << " ******************************** " << endl;
-    //cout << " Press Enter to enter in the chat section" << endl;
+    
     cout << " ******************************** " << endl;
     cout << "               CHAT               " << endl;
     cout << " All the commands are ignored in this section except for !stop_chat " << endl;
-    cout << " Send a message to " <<  peer_username << " \n > " <<  endl;
+    cout << " Send a message to " <<  peer_username << endl;
     return 1;
 }
 
@@ -2322,8 +2338,8 @@ int arriveHandler(int sock_id){
     break;
     }
 
-    if(op!=CHAT_RESPONSE) 
-        free(plaintext);
+    //if(op!=CHAT_RESPONSE) 
+       // free(plaintext);
     return 1;
 }
 
