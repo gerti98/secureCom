@@ -157,6 +157,10 @@ int sym_encrypt(const EVP_CIPHER *cypher, uchar *plaintext, int plaintext_len, u
 int sym_decrypt(const EVP_CIPHER *cypher, uchar **plaintext, int ciphertext_len, uchar *key, 
     uchar *iv, uchar *ciphertext){
 
+    if(ciphertext_len>BUFFER_MAX){
+        perror("Error: buffer too big\n");
+        return 0;
+    }
     if(cypher==nullptr) { 
         perror("Error: unallocated cypher\n");
         return 0;
@@ -208,17 +212,6 @@ int sym_decrypt(const EVP_CIPHER *cypher, uchar **plaintext, int ciphertext_len,
     EVP_CIPHER_CTX_free(ctx);
 
     return plainlen;
-}
-
-// aes_128_cbc wrappers
-int aes_128_cbc_encrypt(uchar *plaintext, int plaintext_len, uchar *key, uchar **iv, uchar **ciphertext)
-{
-    return sym_encrypt(EVP_aes_128_cbc(),plaintext,  plaintext_len, key, iv, ciphertext );
-}
-
-int aes_128_cbc_decrypt(uchar **plaintext, int ciphertext_len, uchar *key, uchar *iv, uchar *ciphertext)
-{
-    return sym_decrypt(EVP_aes_128_cbc(),plaintext,  ciphertext_len, key, iv, ciphertext );
 }
 
 
@@ -450,6 +443,11 @@ uint digest(const EVP_MD* cypher, uchar* plaintext, uint plaintext_len, uchar** 
 
 // CRYPTO_memcmp wrapper
 uint digest_compare(const uchar* digest1, const uchar* digest2, const uint len){
+
+     if(len>BUFFER_MAX){
+        perror("Error: buffer too big\n");
+        return 0;
+    }
    return CRYPTO_memcmp(digest1, digest2,len );
 }
 

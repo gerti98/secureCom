@@ -6,9 +6,6 @@
 using uchar=unsigned char;
 using namespace std;
 
-int aes_128_cbc_encrypt(uchar *plaintext, int plaintext_len, uchar *key, uchar **iv, uchar **ciphertext);
-int aes_128_cbc_decrypt(uchar **plaintext, int ciphertext_len, uchar *key, uchar *iv, uchar *ciphertext);
-
 /**
  * @brief authenticated encryption decrypt
  * 
