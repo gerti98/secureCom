@@ -1921,7 +1921,11 @@ int chatRequestHandler(unsigned char* plaintext)
  * @brief Hanler of the command written by the user
  * 
  * @param userInput 
- * @return return -1 in case of error, 1 if no answer from the server is needed, 2 if an answer from the server is needed
+ * @return return -1 in case of error, 
+ *      1 if no answer from the server is needed, 
+ *      2 if an answer from the server is needed,
+ *      3 if we the command is an !exit
+ *      
  */
 int commandHandler(string userInput){
     int ret;
@@ -2020,6 +2024,9 @@ int commandHandler(string userInput){
         if(cmdToSend.opcode==STOP_CHAT){
             cout << " \t\t    +++ Chat terminated +++\n" << endl;
             return 1;
+        }
+        if(cmdToSend.opcode==EXIT_CMD){
+            return 3;
         }
     }
     return 2;
@@ -2273,6 +2280,8 @@ int main(int argc, char* argv[])
                 }
                 if(ret==2)
                     need_server_answer=true;
+                if(ret==3)
+                    goto close_all;
             }
             if (FD_ISSET(sock_id, &fdlist)!=0) {
                 // Something arrived on the socket  

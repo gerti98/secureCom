@@ -157,7 +157,7 @@ int get_user_socket_by_user_id(int user_id){
  * @return return -1 in case of errors, 0 otherwise
  */
 int set_user_socket(string username, int socket){
-    if(socket < -1){ //Sanitization (-1 indicate tha the user will be offline)
+    if(socket < -1){ //Sanitization (-1 indicate that the user will be offline)
         log("SOCKET fd invalid"); //since file descriptors can have only values >= 0
         return -1;
     }
@@ -166,18 +166,19 @@ int set_user_socket(string username, int socket){
         log("ERROR on sem_prologue");
         return -1;
     }
-    
+
     user_info* user_status = (user_info*)shmem;
     int found = 0;
     for(int i=0; i<REGISTERED_USERS; i++){
         if(user_status[i].username.compare(username) == 0){
             user_status[i].socket_id = socket;
+            if(socket==-1)
+                log("\n\n***** logout of client " +username+" *****\n\n");
             log("Set socket of " + username + " correctly");
             found = 1;
             break;
         }
     }
-
     if(-1 == sem_epilogue(sem_id)){
         log("ERROR on sem_epilogue");
         return -1;
@@ -1624,6 +1625,11 @@ int main(){
                         return 0;
                     }
                     break;
+                case EXIT_CMD:
+                    safe_free(session_key, session_key_len);
+                    set_user_socket(get_username_by_user_id(client_user_id), -1);
+                    close(comm_socket_id);
+                    exit(0);
                 default:
                     log("\n\n***** INVALID COMMAND *****\n\n");
                     break;
