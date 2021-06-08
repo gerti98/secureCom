@@ -72,7 +72,7 @@
 #define NONCE_SIZE 2
 #define AUTH_CLNT_SRV 1
 #define AUTH_CLNT_CLNT 2
-
+#define MAX_SEQ_NUM 0xFFFFFFFF
 /**************************
 *   CRYPTO CONSTANTS
 ***************************/

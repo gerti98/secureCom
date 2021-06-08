@@ -455,6 +455,11 @@ int open_msg_by_client(unsigned char* ciphertext, uint32_t msgRecLen, unsigned c
         safe_free(*plaintext,pt_len);
         return -1;
     }
+    if(sequence_number==MAX_SEQ_NUM){
+        cerr << " Error: maximum number of message in the session reached " << endl;
+        safe_free(*plaintext,pt_len);
+        return -1;
+    }
     receive_counter_client_client=sequence_number+1;
 
     uint32_t msg_len = pt_len - sizeof(uint32_t);
@@ -589,6 +594,11 @@ int recv_secure(int socket, unsigned char** plaintext)
     if(sequece_number<receive_counter){
         cerr << " Error: wrong seq number " << endl;
         free(plaintext);
+        return -1;
+    }
+    if(sequece_number==MAX_SEQ_NUM){
+        cerr << " Error: maximum number of message in the session reached " << endl;
+        safe_free(*plaintext,pt_len);
         return -1;
     }
     receive_counter=sequece_number+1;
