@@ -22,10 +22,6 @@
 
 using namespace std;
 
-typedef void (*sighandler_t)(int);
-
-
-
 //---------------- GLOBAL VARIABLES ------------------//
 /* This global variable is setted to true if the user is in chat with 
  * another client, to false otherwise*/
@@ -114,12 +110,14 @@ void welcome()
  */
 void help()
 {
+    cout << "\n*********************************************************************" << endl;
     cout << " !users_online" << endl;
     cout << "   Ask the server to return the list of the online users" << endl;
     cout << " !chat" << endl;
     cout << "   Ask the server to start a chat" << endl;
     cout << " !exit" << endl;
     cout << "   Close the application" << endl;
+    cout << "*********************************************************************\n" << endl;
 }
 
 /**
@@ -149,7 +147,7 @@ uint8_t commandStringHandler(string cmd)
  * 
  * @param userId 
  * @param userlist 
- * @return string that is the username, NULL if error
+ * @return string that is the username, empty string if error
  */
 string getUsernameFromID(int userId, user* userlist)
 { 
@@ -159,8 +157,7 @@ string getUsernameFromID(int userId, user* userlist)
     }
     struct user* tmp = userlist;
     while(tmp!=NULL) {
-        if(tmp->userId==userId) {
-            //strncpy((char*)username, (char*)tmp->username, tmp->usernameSize);  
+        if(tmp->userId==userId) { 
             string username ((char*)(tmp->username)); 
             return username;
         }
@@ -181,7 +178,8 @@ int chat(struct commandMSG* toSend, user* userlist)
     if(userlist==NULL)
         return -1;
     toSend->opcode = CHAT_CMD; 
-    cout << " Write the userID of the user that you want to contact" << endl;
+    cout << "\n******************************************************" << endl;
+    cout << "Write the userID of the user that you want to contact" << endl;
     printf(" > ");
     cin >> toSend->userId;
     cin.ignore(100,'\n');
@@ -189,9 +187,13 @@ int chat(struct commandMSG* toSend, user* userlist)
         cout << " You cannot chat with yourself " << endl;
         return -1;
     }
+    if(toSend->userId<0){
+        cout << " Negative user id " << endl;
+        return -1;
+    }
+    cout << "Wait for user's response and authentication ...." << endl;
     peer_id = toSend->userId;
     peer_username = getUsernameFromID(peer_id, userlist);
-    cout << " dbg: I want to contact " << peer_username << endl;
     if(peer_username.empty())
         return -1;
     return 0;
@@ -204,7 +206,6 @@ int chat(struct commandMSG* toSend, user* userlist)
  */
 void free_list_users(struct user* userlist)
 {
-    cout << " Free list of users " << endl;
     if(userlist==NULL)
         return;
 
@@ -222,30 +223,22 @@ void free_list_users(struct user* userlist)
 /**
  * @brief The function receives from the server the list of the user and it store it
  * 
- * @param sock_id socket id
- * @param userlist data structure to store the list
- * @return The number of online users, -1 if error, 0 if no user in the list
- */
-//int retrieveOnlineUsers(int sock_id, user*& user_list)
-
-/**
- * @brief The function receives from the server the list of the user and it store it
- * 
  * @param plaintext received message decrypted
  * @return The number of online users, -1 if error, 0 if no user in the list
  */
 int retrieveOnlineUsers(unsigned char* plaintext)
 {
-    if(user_list!=NULL)
+    if(user_list!=NULL){
         free_list_users(user_list);
+        user_list = NULL;
+    }
     uint32_t howMany;
     int ret;
     uint32_t bytes_read = 5; // Because I have already read the opcode and the seq number
-    //int ret = recv(sock_id, (void*)&howMany, sizeof(int), 0);  
+    // Read how many users 
     memcpy(&howMany, plaintext+bytes_read, sizeof(uint32_t));
     bytes_read += sizeof(uint32_t);
     howMany = ntohl(howMany);
-    cout << " DBG - Number of users: " << howMany << endl;
     
     if(ret <= 0)
         return -1;
@@ -258,12 +251,12 @@ int retrieveOnlineUsers(unsigned char* plaintext)
     struct user* tmp = NULL;
 
     for(int i = 0; i<howMany; i++) {
-        cout << " DBG - i: " << i << endl;
         int username_size;
         tmp = (struct user*)malloc(sizeof(user));
-
         if(!tmp) {
-            cout << "Malloc failed " << endl; 
+            errorHandler(MALLOC_ERR); 
+            free_list_users(user_list);
+            user_list = NULL;
             return -1;
         }
 
@@ -272,51 +265,42 @@ int retrieveOnlineUsers(unsigned char* plaintext)
         tmp->next = NULL;
         tmp->usernameSize = 0;
 
-        //ret = recv(sock_id, (void*)&(tmp->userId), sizeof(int), 0);  
         memcpy(&(tmp->userId), plaintext+bytes_read, sizeof(int));
         bytes_read += sizeof(int);
 
         tmp->userId = ntohl(tmp->userId);
-        cout << " DBG - User id: " << tmp->userId << endl;
         if(ret <= 0) {
             free(tmp);
             free_list_users(user_list);
+            user_list = NULL;
             return -1;
         }
 
-       // ret = recv(sock_id, (void*)&username_size, sizeof(int), 0);  
-       /* if(ret <= 0) {
-            free(tmp);
-            free_list_users(user_list);
-            return -1;
-        }*/
         memcpy(&username_size, plaintext+bytes_read, sizeof(int));
         bytes_read += sizeof(int);
 
         username_size = ntohl(username_size);
-        cout << " DBG - Username size: " << username_size << endl;
         tmp->usernameSize = username_size;
         if(username_size>MAX_USERNAME_SIZE) {
             free(tmp);
             free_list_users(user_list);
+            user_list = NULL;
             return -1;
         }
 
         tmp->username = (unsigned char*)malloc(username_size+1);
-        if(!tmp->username)
+        if(!tmp->username){
             errorHandler(MALLOC_ERR);
-        
-        /*ret = recv(sock_id, (void*)(tmp->username), username_size, 0);  
-        if(ret <= 0) {   
-            free(tmp->username);
             free(tmp);
             free_list_users(user_list);
+            user_list = NULL;
             return -1;
-        }*/
+        }
+        
         memcpy(tmp->username, plaintext+bytes_read, username_size);
         bytes_read += username_size;
         tmp->username[username_size] = '\0';
-        cout << " DBG - Username: " << tmp->username << endl;
+   
         if(i==0)
             user_list = tmp;
         else
@@ -336,17 +320,19 @@ int retrieveOnlineUsers(unsigned char* plaintext)
 int print_list_users(user* userlist)
 {
     if(userlist==NULL) {
-        cout << " Warning: userlist is null " << endl;
+        cout << " User list is NULL " << endl;
         return -1;
     }
     struct user* tmp = userlist;
-    cout << " **** USER LIST **** " << endl;
+    cout << endl;
+    cout << "**** USER LIST **** " << endl;
     cout << "  ID \t Username" << endl;
     while(tmp!=NULL) {
         cout << "  " << tmp->userId << " \t " << tmp->username << endl;
         tmp = tmp->next;
     }
-    cout << " ****************** " << endl;
+    cout << "****************** " << endl;
+    cout << endl;
     return 0;
 }
 
@@ -360,13 +346,12 @@ int print_list_users(user* userlist)
  */
 int open_msg_by_client(unsigned char* ciphertext, uint32_t msgRecLen, unsigned char** plaintext)
 {
-    cout << " [DBG] - Involucro interno " << endl;
-    BIO_dump_fp(stdout, (const char*)ciphertext, msgRecLen);
+    //cout << " [DBG] - Involucro interno " << endl;
+    //BIO_dump_fp(stdout, (const char*)ciphertext, msgRecLen);
 
     uint32_t header_len = sizeof(uint32_t)+IV_DEFAULT+TAG_DEFAULT; 
     uint32_t read = 9; // because seq number, opcode and len already read
     uint32_t ct_len;
-    cout << " [DBG] - header_len: " << header_len <<  endl;
     uint32_t pt_len;
     int ret;
  
@@ -395,18 +380,15 @@ int open_msg_by_client(unsigned char* ciphertext, uint32_t msgRecLen, unsigned c
 
     // Open header
     memcpy((void*)&ct_len, header, sizeof(uint32_t));
-    cout << " ct_len :" << endl;
-    BIO_dump_fp(stdout, (const char*)&ct_len, sizeof(uint32_t));
     ct_len = ntohl(ct_len);
-    cout << " ct len " << ct_len << endl;
 
     memcpy(iv, header+sizeof(uint32_t), IV_DEFAULT);
-    cout << " iv :" << endl;
-    BIO_dump_fp(stdout, (const char*)iv, IV_DEFAULT);
+    //cout << " iv :" << endl;
+    //BIO_dump_fp(stdout, (const char*)iv, IV_DEFAULT);
 
     memcpy(tag, header+sizeof(uint32_t)+IV_DEFAULT, TAG_DEFAULT);
-    cout << " tag " << endl;
-    BIO_dump_fp(stdout, (const char*)tag, TAG_DEFAULT);
+    //cout << " tag " << endl;
+    //BIO_dump_fp(stdout, (const char*)tag, TAG_DEFAULT);
 
     unsigned char* aad = (unsigned char*)malloc(sizeof(uint32_t));
     if(!aad){
@@ -418,8 +400,8 @@ int open_msg_by_client(unsigned char* ciphertext, uint32_t msgRecLen, unsigned c
         return -1;
     }
     memcpy(aad, header, sizeof(uint32_t));
-    cout << " AAD : " << endl;
-    BIO_dump_fp(stdout, (const char*)aad, sizeof(uint32_t));
+    //cout << " AAD : " << endl;
+    //BIO_dump_fp(stdout, (const char*)aad, sizeof(uint32_t));
 
     if(session_key_clientToClient==NULL){
         cerr << " Null key " << endl;
@@ -456,8 +438,8 @@ int open_msg_by_client(unsigned char* ciphertext, uint32_t msgRecLen, unsigned c
     }
     // cout << " ciphertext is: " << endl;
     // BIO_dump_fp(stdout, (const char*)ciphertext, ct_len);
-    cout << " plaintext is " << endl;
-    BIO_dump_fp(stdout, (const char*)(*plaintext), pt_len);
+    //cout << " plaintext is " << endl;
+    //BIO_dump_fp(stdout, (const char*)(*plaintext), pt_len);
     free(ciphertext);
     free(header);
     free(tag);
@@ -465,10 +447,9 @@ int open_msg_by_client(unsigned char* ciphertext, uint32_t msgRecLen, unsigned c
 
     // check seq number
     uint32_t sequence_number = ntohl(*(uint32_t*) (*plaintext));
-    cout << " received sequence number " << sequence_number  << " aka " << *(uint32_t*) (*plaintext) << endl;
-    cout << " Expected sequence number " << receive_counter_client_client << endl;
+    //cout << " Received sequence number " << sequence_number  << " aka " << *(uint32_t*) (*plaintext) << endl;
+    //cout << " Expected sequence number " << receive_counter_client_client << endl;
 
-    // TO DO AGGIUNGERE SEQ NUMBER
     if(sequence_number<receive_counter_client_client){
         cerr << " Error: wrong seq number " << endl;
         safe_free(*plaintext,pt_len);
@@ -487,7 +468,6 @@ int open_msg_by_client(unsigned char* ciphertext, uint32_t msgRecLen, unsigned c
 
     *plaintext = risp; 
 
-
     return msg_len;
 }
 
@@ -501,9 +481,7 @@ int open_msg_by_client(unsigned char* ciphertext, uint32_t msgRecLen, unsigned c
  */
 int recv_secure(int socket, unsigned char** plaintext)
 {
-    cout << " DBG - SECURE RECEIVE " << endl;
     uint32_t header_len = sizeof(uint32_t)+IV_DEFAULT+TAG_DEFAULT; 
-    //cout << " DBG - header_len: " << header_len << endl;
     uint32_t ct_len;
     unsigned char* ciphertext = NULL;
     uint32_t pt_len;
@@ -529,8 +507,6 @@ int recv_secure(int socket, unsigned char** plaintext)
     }
 
     // Receive Header
-    //cout << " DBG - Before recv " << endl;
-    //BIO_dump_fp(stdout, (const char*)header, header_len);
     ret = recv(sock_id, (void*)header, header_len, 0);
     if(ret <= 0 || ret != header_len){
         cerr << " Error in header reception " << ret << endl;
@@ -540,20 +516,18 @@ int recv_secure(int socket, unsigned char** plaintext)
         free(iv);
         return -1;
     }
-    BIO_dump_fp(stdout, (const char*)header, header_len);
+    //BIO_dump_fp(stdout, (const char*)header, header_len);
 
     // Open header
     memcpy((void*)&ct_len, header, sizeof(uint32_t));
-    cout << " ct_len :" << endl;
-    BIO_dump_fp(stdout, (const char*)&ct_len, sizeof(uint32_t));
 
     memcpy(iv, header+sizeof(uint32_t), IV_DEFAULT);
-    cout << " iv :" << endl;
-    BIO_dump_fp(stdout, (const char*)iv, IV_DEFAULT);
+    //cout << " iv :" << endl;
+    //BIO_dump_fp(stdout, (const char*)iv, IV_DEFAULT);
 
     memcpy(tag, header+sizeof(uint32_t)+IV_DEFAULT, TAG_DEFAULT);
-    cout << " tag " << endl;
-    BIO_dump_fp(stdout, (const char*)tag, TAG_DEFAULT);
+    //cout << " tag " << endl;
+    //BIO_dump_fp(stdout, (const char*)tag, TAG_DEFAULT);
 
     unsigned char* aad = (unsigned char*)malloc(sizeof(uint32_t));
     if(!aad){
@@ -565,14 +539,11 @@ int recv_secure(int socket, unsigned char** plaintext)
         return -1;
     }
     memcpy(aad, header, sizeof(uint32_t));
-    cout << " AAD : " << endl;
-    BIO_dump_fp(stdout, (const char*)aad, sizeof(uint32_t));
+    //cout << " AAD : " << endl;
+    //BIO_dump_fp(stdout, (const char*)aad, sizeof(uint32_t));
 
     // Receive ciphertext
-    cout << " DBG - ct_len before ntohl is " << ct_len << endl;
     ct_len = ntohl(ct_len);
-    cout << " DBG - ct_len real is " << ct_len << endl;
-
     ciphertext = (unsigned char*)malloc(ct_len);
     if(!ciphertext){
         cerr << " Error in malloc for ciphertext " << endl;
@@ -590,12 +561,8 @@ int recv_secure(int socket, unsigned char** plaintext)
         free(iv);
         return -1;
     }
-    // cout << " ciphertext is: " << endl;
-    // BIO_dump_fp(stdout, (const char*)ciphertext, ct_len);
 
     // Decryption
-    cout<<"Session key:"<<endl;
-    BIO_dump_fp(stdout, (const char*) session_key_clientToServer, 32);
     pt_len = auth_enc_decrypt(ciphertext, ct_len, aad, sizeof(uint32_t), session_key_clientToServer, tag, iv, plaintext);
     if(pt_len == 0 || pt_len!=ct_len){
         cerr << " Error during decryption " << endl;
@@ -606,10 +573,10 @@ int recv_secure(int socket, unsigned char** plaintext)
         free(iv);
         return -1;
     }
-    cout << " [DBG] - ciphertext is: " << endl;
-    BIO_dump_fp(stdout, (const char*)ciphertext, ct_len);
-    cout << " [DBG] - plaintext is " << endl;
-    BIO_dump_fp(stdout, (const char*)*plaintext, pt_len);
+    //cout << " [DBG] - ciphertext is: " << endl;
+    //BIO_dump_fp(stdout, (const char*)ciphertext, ct_len);
+    //cout << " [DBG] - plaintext is " << endl;
+    //BIO_dump_fp(stdout, (const char*)*plaintext, pt_len);
     free(ciphertext);
     free(header);
     free(tag);
@@ -617,8 +584,8 @@ int recv_secure(int socket, unsigned char** plaintext)
 
     // check seq number
     uint32_t sequece_number = ntohl(*(uint32_t*) (*plaintext));
-    cout << " received sequence number " << sequece_number  << " aka " << *(uint32_t*) (*plaintext) << endl;
-    cout << " Expected sequence number " << receive_counter << endl;
+    //cout << " received sequence number " << sequece_number  << " aka " << *(uint32_t*) (*plaintext) << endl;
+    //cout << " Expected sequence number " << receive_counter << endl;
     if(sequece_number<receive_counter){
         cerr << " Error: wrong seq number " << endl;
         free(plaintext);
@@ -643,13 +610,12 @@ int prepare_msg_for_client(unsigned char* pt, uint32_t pt_len, unsigned char** m
     uchar *tag, *iv, *ct, *aad;
 
     uint aad_len;
-    cout << " [DBG] - Plaintext of msg to prepare: " << endl;
-    BIO_dump_fp(stdout, (const char*)pt, pt_len);
+    //cout << " [DBG] - Plaintext of msg to prepare: " << endl;
+    //BIO_dump_fp(stdout, (const char*)pt, pt_len);
     uint32_t header_len = sizeof(uint32_t)+IV_DEFAULT+TAG_DEFAULT;
 
     // adding sequence number
     uint32_t counter_n=htonl(send_counter_client_client);
-    cout <<" adding sequrnce number " << counter_n<<endl;
     uchar* pt_seq = (uchar*)malloc(pt_len+sizeof(uint32_t));
     if(!pt_seq){
         safe_free(pt, pt_len);
@@ -660,8 +626,8 @@ int prepare_msg_for_client(unsigned char* pt, uint32_t pt_len, unsigned char** m
     memcpy(pt_seq+sizeof(uint32_t), pt, pt_len);
     pt=pt_seq;
     pt_len+=sizeof(uint32_t);
-    cout << "Plaintext to send (with seq):" << endl;
-    BIO_dump_fp(stdout, (const char*)pt, pt_len);
+    //cout << "Plaintext to send (with seq):" << endl;
+    //BIO_dump_fp(stdout, (const char*)pt, pt_len);
 
     int aad_ct_len_net = htonl(pt_len); //Since we use GCM ciphertext == plaintext
     if(session_key_clientToClient==NULL){
@@ -678,7 +644,7 @@ int prepare_msg_for_client(unsigned char* pt, uint32_t pt_len, unsigned char** m
         free(pt_seq);
         return 0;
     }
-    cout << " ct_len: " << to_string(ct_len) << endl; 
+
     uint msg_to_send_len = ct_len + header_len, bytes_copied = 0;
     *msg_to_send = (uchar*)malloc(msg_to_send_len);
     if(!(*msg_to_send)){
@@ -691,7 +657,6 @@ int prepare_msg_for_client(unsigned char* pt, uint32_t pt_len, unsigned char** m
         return 0;
     }
 
-    cout << aad_ct_len_net << " -> " << ntohl(aad_ct_len_net) << endl;
     memcpy((*msg_to_send) + bytes_copied, &aad_ct_len_net, sizeof(uint32_t));
     bytes_copied += sizeof(uint32_t);
     memcpy((*msg_to_send) + bytes_copied, iv, IV_DEFAULT);
@@ -702,10 +667,10 @@ int prepare_msg_for_client(unsigned char* pt, uint32_t pt_len, unsigned char** m
     bytes_copied += ct_len;
 
     if(bytes_copied!=msg_to_send_len)
-        cerr << " errore " << bytes_copied << " " << msg_to_send_len << endl;
+        cerr << " Warning " << bytes_copied << " != " << msg_to_send_len << endl;
 
-    cout << " [DBG] - Message Prepared: " << endl; 
-    BIO_dump_fp(stdout, (const char*)(*msg_to_send), bytes_copied);
+    //cout << " [DBG] - Message Prepared: " << endl; 
+    //BIO_dump_fp(stdout, (const char*)(*msg_to_send), bytes_copied);
 
     safe_free(pt, pt_len);
     free(iv);
@@ -729,13 +694,12 @@ int send_secure(int comm_socket_id, uchar* pt, int pt_len){
     uchar *tag, *iv, *ct, *aad;
 
     uint aad_len;
-    cout << " [DBG] - Plaintext to send:" << endl;
-    BIO_dump_fp(stdout, (const char*)pt, pt_len);
+    //cout << " [DBG] - Plaintext to send:" << endl;
+    //BIO_dump_fp(stdout, (const char*)pt, pt_len);
     uint32_t header_len = sizeof(uint32_t)+IV_DEFAULT+TAG_DEFAULT;
 
     // adding sequence number
     uint32_t counter_n=htonl(send_counter);
-    cout <<" adding sequrnce number " << counter_n<<endl;
     uchar* pt_seq = (uchar*)malloc(pt_len+sizeof(uint32_t));
     if(!pt_seq){
         safe_free(pt, pt_len);
@@ -745,9 +709,9 @@ int send_secure(int comm_socket_id, uchar* pt, int pt_len){
     memcpy(pt_seq+ sizeof(uint32_t), pt, pt_len);
     pt=pt_seq;
     pt_len+=sizeof(uint32_t);
-    cout << " Plaintext to send (with seq):" << endl;
-    BIO_dump_fp(stdout, (const char*)pt, pt_len);
-    cout << " pt_len -> " << pt_len << endl;
+    //cout << " Plaintext to send (with seq):" << endl;
+    //BIO_dump_fp(stdout, (const char*)pt, pt_len);
+ 
     int aad_ct_len_net = htonl(pt_len); //Since we use GCM ciphertext == plaintext
     if(session_key_clientToServer==NULL){
         cerr << " Null key " << endl;
@@ -762,7 +726,7 @@ int send_secure(int comm_socket_id, uchar* pt, int pt_len){
         free(pt_seq);
         return 0;
     }
-    cout << "ct_len: " << to_string(ct_len) << endl; 
+    
     uint msg_to_send_len = ct_len + header_len, bytes_copied = 0;
     uchar* msg_to_send = (uchar*)malloc(msg_to_send_len);
     if(!msg_to_send){
@@ -775,7 +739,6 @@ int send_secure(int comm_socket_id, uchar* pt, int pt_len){
         return 0;
     }
 
-    cout << aad_ct_len_net << " -> " << ntohl(aad_ct_len_net) << endl;
     memcpy(msg_to_send + bytes_copied, &aad_ct_len_net, sizeof(uint));
     bytes_copied += sizeof(uint);
     memcpy(msg_to_send + bytes_copied, iv, IV_DEFAULT);
@@ -784,22 +747,9 @@ int send_secure(int comm_socket_id, uchar* pt, int pt_len){
     bytes_copied += TAG_DEFAULT;
     memcpy(msg_to_send + bytes_copied, ct, ct_len);
     bytes_copied += ct_len;
-
-    cout << "Msg (authenticated and encrypted) to send, (copied " << to_string(bytes_copied) << " of " << to_string(msg_to_send_len) << "):" << endl;
-    BIO_dump_fp(stdout, (const char*)msg_to_send, msg_to_send_len);
-
-    //-----------------------------------------------------------
-    // Controllo encr/decr
-   /* unsigned char* pt_test = NULL;
-    int pt_len_test = auth_enc_decrypt(ct, ct_len, (uchar*)&aad_ct_len_net, sizeof(uint32_t), session_key_clientToServer, tag, iv, &pt_test);
-    if(pt_len_test == 0){
-        log("auth_enc_decrypt failed");
-        return 0;
-    }
-    cout << " plaintext " << endl;*/
-    //BIO_dump_fp(stdout, (const char*)pt_test, pt_len_test);
+   
     safe_free(pt, pt_len);
-    //------------------------------------------------------
+
     ret = send(comm_socket_id, msg_to_send, msg_to_send_len, 0);
     if(ret <= 0 || ret != msg_to_send_len){
         errorHandler(SEND_ERR);
@@ -811,13 +761,12 @@ int send_secure(int comm_socket_id, uchar* pt, int pt_len){
         return 0;
     }
     send_counter++;
-    cout << " DBG - message sent " << endl;
+
     safe_free(msg_to_send, msg_to_send_len);
 
     free(iv);
     free(tag);
     free(ct);
-    //free(pt_seq);
     return 1;
 }
 
@@ -851,7 +800,6 @@ int send_command_to_server(int sock_id, commandMSG* cmdToSend)
         return -1;
     }
     safe_free(pt, pt_len);
-    cout << " DBG - I have sent " << (uint16_t)cmdToSend->opcode << " " << cmdToSend->userId << " aka " << net_id << endl;
     return 0;
 }
 
@@ -875,7 +823,6 @@ int send_message(int sock_id, genericMSG* msgToSend)
         return -1;
     }
 
-    cout << " [DBG] - Internal message prepared " << endl;
     int bytes_allocated = 0;
     
     uint32_t net_peer_user_id = htonl(peer_id);
@@ -886,14 +833,13 @@ int send_message(int sock_id, genericMSG* msgToSend)
     memcpy((void*)(msg+bytes_allocated), msgInternalPart, msgInternalPart_len);
     bytes_allocated += msgInternalPart_len;
 
-    cout << " [DBG] - Msg To send (with opcode+userid and then msg)" << endl;
-    BIO_dump_fp(stdout, (const char*)msg, bytes_allocated);
+    //cout << " [DBG] - Msg To send (with opcode+userid and then msg)" << endl;
+    //BIO_dump_fp(stdout, (const char*)msg, bytes_allocated);
 
     if(bytes_allocated!=msg_len)
         cout << " WARNING - Something is going wrong " << endl;
 
     int ret = send_secure(sock_id, msg, msg_len);
-   // int ret = send_secure(sock_id, msgToSend->payload, msgToSend->length);
     if(ret==0){
         cerr << " send secure failed " << endl;
         safe_free(msgInternalPart, msgInternalPart_len);
@@ -901,7 +847,7 @@ int send_message(int sock_id, genericMSG* msgToSend)
         return -1;
     }
 
-    // safe_free(msgToSend->payload, msgToSend->length); Free inside prepare_msg_for_client
+    // safe_free(msgToSend->payload, msgToSend->length); not needed because free inside prepare_msg_for_client
     safe_free(msgInternalPart, msgInternalPart_len);
     safe_free(msg, msg_len);
 
@@ -917,10 +863,7 @@ int send_message(int sock_id, genericMSG* msgToSend)
  */
 int receive_message(int sock_id, string& msg, unsigned char* msgReceived, uint32_t msgReceived_len)
 {
-    printf("Receive_message\n");
-
     unsigned char* pt = NULL;
-    cout << "len msg received " << msgReceived_len << endl;
     uint32_t pt_len = open_msg_by_client(msgReceived, msgReceived_len, &pt);
     if(pt_len<=0){
         return -1;
@@ -938,7 +881,6 @@ int receive_message(int sock_id, string& msg, unsigned char* msgReceived, uint32
  */
 int retrieve_my_userID(int socket)
 {
-    cout << " DBG - Retrieving user id " << endl;
     unsigned char* plaintext = NULL;
     int pt_len = recv_secure(sock_id, &plaintext);
     if(pt_len==-1)
@@ -947,7 +889,7 @@ int retrieve_my_userID(int socket)
     // check opcode
     uint8_t opcode_rec;
     memcpy(&opcode_rec, plaintext+4, sizeof(uint8_t));
-    cout << " opcode received is " << (uint16_t)opcode_rec << endl;
+
     if(opcode_rec!=USRID){
         cerr << " Error: wrong opcode " << endl;
         free(plaintext);
@@ -955,13 +897,8 @@ int retrieve_my_userID(int socket)
     }
 
     int loggedUser_id_net;
-    //BIO_dump_fp(stdout, (const char*)&loggedUser_id_net, sizeof(uint32_t));
     memcpy(&loggedUser_id_net, plaintext+sizeof(uint32_t)+1, sizeof(uint32_t));
-    //BIO_dump_fp(stdout, (const char*)&loggedUser_id_net, sizeof(uint32_t));
-    
-    loggedUser_id = ntohl(loggedUser_id_net);
-    //BIO_dump_fp(stdout, (const char*)&loggedUser_id, sizeof(uint32_t));
-    cout << " I'm the user with ID " << loggedUser_id  << " aka " << loggedUser_id_net << endl;  
+    loggedUser_id = ntohl(loggedUser_id_net);  
     return 0;
 }
 
@@ -974,7 +911,6 @@ int retrieve_my_userID(int socket)
  */
 int automatic_neg_response(int sock_id, int refused_user)
 {
-    cout << " Automatic negative response " << endl;
     uint32_t risp_buff_size = sizeof(uint8_t)+sizeof(int);
     unsigned char* risp_buff = (unsigned char*)malloc(risp_buff_size);
     if(!risp_buff)
@@ -1004,8 +940,7 @@ int automatic_neg_response(int sock_id, int refused_user)
  */
 int authentication(int sock_id, uint8_t ver)
 {
-    
-    // If the authentication is done with another client with the word server is indicated the other client
+    // If the authentication is done with another client with the word "server" indicates the other client
     if(ver!=AUTH_CLNT_CLNT && ver!=AUTH_CLNT_SRV)
         return -1;
     bool tooBig = false;                    // indicates if the username inserted by the user is too big
@@ -1039,8 +974,8 @@ int authentication(int sock_id, uint8_t ver)
         do{
             if(tooBig)
                 cout << " The username inserted is too big! " << endl;
-            cout << " Who are you? " << endl;
-            cout << " > ";
+            cout << "Who are you? " << endl;
+            cout << "> ";
             cin >> loggedUser;
             cin.ignore(100,'\n');
             if(loggedUser.size()+1>MAX_USERNAME_SIZE)
@@ -1052,17 +987,15 @@ int authentication(int sock_id, uint8_t ver)
      * M1 - Send R,username to the server
      *************************************************************/
     // Nonce Generation
-    cout << " DBG - Nonce generation " << endl;
     nonce = (unsigned char*)malloc(NONCE_SIZE);
     if(!nonce)
         return -1;
     random_generate(NONCE_SIZE, nonce);
-    cout << " DBG - Nonnce generated: " << endl;
-    BIO_dump_fp(stdout, (const char*)nonce, NONCE_SIZE);
+    //cout << " DBG - Nonnce generated: " << endl;
+    //BIO_dump_fp(stdout, (const char*)nonce, NONCE_SIZE);
 
     // Preparation of the username
     if(ver==AUTH_CLNT_SRV){
-        cout << " DBG - Preparation of the usename " << endl;
         usernameSize = loggedUser.size()+1; // +1 for string terminator
         name = (unsigned char*)malloc(usernameSize);
         if(!name){
@@ -1074,7 +1007,6 @@ int authentication(int sock_id, uint8_t ver)
         name[usernameSize-1] = '\0'; // to avoid error in strncpy
     }
     // Composition of the message: OPCODE, R, USERNAME_SIZE, USERNAME
-    cout << " DBG - Composition of the message " << endl;
     size_to_allocate = (ver==AUTH_CLNT_SRV) ? (NONCE_SIZE+sizeof(uint32_t)+usernameSize) : (sizeof(uint8_t) + NONCE_SIZE + sizeof(int));
     msg_auth_1 = (unsigned char*)malloc(size_to_allocate);
     if(!msg_auth_1){
@@ -1092,7 +1024,6 @@ int authentication(int sock_id, uint8_t ver)
         msg_bytes_written += usernameSize;
     }
     else if(ver==AUTH_CLNT_CLNT){
-        cout << "Peer_id " << peer_id << " net:" << peer_id_net << endl;
         uint8_t op = AUTH;
         memcpy(msg_auth_1, (void*)&op, sizeof(uint8_t));
         msg_bytes_written = sizeof(uint8_t); 
@@ -1102,11 +1033,11 @@ int authentication(int sock_id, uint8_t ver)
         msg_bytes_written += NONCE_SIZE;
     }
 
-    cout << " DBG - M1: " << endl;
-    BIO_dump_fp(stdout, (const char*)msg_auth_1, msg_bytes_written);
+    //cout << " DBG - M1: " << endl;
+    //BIO_dump_fp(stdout, (const char*)msg_auth_1, msg_bytes_written);
 
     // Send the message to the server
-    cout << " DBG - Sending M1 to server " << endl;
+    //cout << " DBG - Sending M1 to server " << endl;
     if(ver==AUTH_CLNT_SRV){
         ret = send(sock_id, (void*)msg_auth_1, msg_bytes_written, 0);
         if(ret<=0 || ret != msg_bytes_written){
@@ -1126,7 +1057,6 @@ int authentication(int sock_id, uint8_t ver)
     /*************************************************************
      * M2 - Wait for message from the server
      *************************************************************/
-    cout << " DBG - Wait for M2" << endl;
     // wait for nonce
     if(ver==AUTH_CLNT_CLNT){
         uint8_t op_tmp;
@@ -1144,7 +1074,6 @@ int authentication(int sock_id, uint8_t ver)
                 // automatic refuse
                 int rejected_user;
                 memcpy(&rejected_user, msg2_pt+read_tmp, sizeof(uint32_t));
-                cout << " DBG - The user " << ntohl(rejected_user) << " wants to chat but I am busy " << endl;
                 automatic_neg_response(sock_id, rejected_user);
             }
             else if(op_tmp!=AUTH){
@@ -1174,11 +1103,10 @@ int authentication(int sock_id, uint8_t ver)
         memcpy(server_nonce, msg2_pt + read_from_msg2, NONCE_SIZE);
         read_from_msg2 += NONCE_SIZE;
     }
-    cout << " DBG - R2 received: " << endl;
-    BIO_dump_fp(stdout, (const char*)&server_nonce, NONCE_SIZE);
+    //cout << " DBG - R2 received: " << endl;
+    //BIO_dump_fp(stdout, (const char*)&server_nonce, NONCE_SIZE);
 
     // Read the length of the DH server pub key
-    cout << " DBG - Read length of DH server pub key " << endl;
     if(ver==AUTH_CLNT_SRV){
         ret = recv(sock_id, (void*)&dh_pub_srv_key_size, sizeof(int), 0);  
         if(ret <= 0){
@@ -1194,7 +1122,6 @@ int authentication(int sock_id, uint8_t ver)
     dh_pub_srv_key_size = ntohl(dh_pub_srv_key_size);
 
     // Read DH server pub key
-    cout << " DBG - Read server pubkey for "<< dh_pub_srv_key_size<<" bytes"<< endl;
     dh_server_pubkey = (unsigned char*)malloc(dh_pub_srv_key_size);
     if(!dh_server_pubkey){
         free(server_nonce);
@@ -1215,12 +1142,11 @@ int authentication(int sock_id, uint8_t ver)
         read_from_msg2 += dh_pub_srv_key_size;
     }
 
-    cout << " DBG - DHpubk_S received: " << endl;
-    BIO_dump_fp(stdout, (const char*)&dh_server_pubkey, dh_pub_srv_key_size);
+    //cout << " DBG - DHpubk_S received: " << endl;
+    //BIO_dump_fp(stdout, (const char*)&dh_server_pubkey, dh_pub_srv_key_size);
 
 
     // Read signature length
-    cout << " DBG - Read signature length " << endl;
     if(ver==AUTH_CLNT_SRV){
         ret = recv(sock_id, (void*)&len_signature, sizeof(uint32_t), 0);  
         if(ret <= 0 || ret!=sizeof(uint32_t)){
@@ -1238,7 +1164,6 @@ int authentication(int sock_id, uint8_t ver)
 
     
     // Read signature
-    cout << " DBG - Read signature "<< len_signature<<" bytes"<< endl;
     signature = (unsigned char*)malloc(len_signature);
     if(!signature){
         free(server_nonce);
@@ -1264,7 +1189,6 @@ int authentication(int sock_id, uint8_t ver)
     
     // Read certificate length
     if(ver==AUTH_CLNT_SRV){
-        cout << " DBG - Read certificate length " << endl;
         ret = recv(sock_id, (void*)&cert_length, sizeof(uint32_t), 0);  
         if(ret <= 0 || ret!=sizeof(uint32_t)){
             free(server_nonce);
@@ -1276,7 +1200,6 @@ int authentication(int sock_id, uint8_t ver)
         cert_length = ntohl(cert_length);
 
         // Read certificate
-        cout << " DBG - Read certificate for "<< cert_length<<" bytes"<< endl;
         server_cert = (unsigned char*)malloc(cert_length);
         if(!server_cert){
             free(server_nonce);
@@ -1298,11 +1221,10 @@ int authentication(int sock_id, uint8_t ver)
     }
 
     // Check the authenticity of the msg
-    cout << " DBG - Check the authenticity of the msg " << endl;
     len_signed_msg = NONCE_SIZE*2+dh_pub_srv_key_size;
     signed_msg = (unsigned char*)malloc(len_signed_msg);
     if(!signed_msg){
-        cerr<<"no msg"<<endl;
+        cerr<<" no msg "<<endl;
         free(server_nonce);
         free(nonce);
         free(dh_server_pubkey);
@@ -1342,8 +1264,7 @@ int authentication(int sock_id, uint8_t ver)
 
         ret = verify_sign_cert(server_cert, cert_length, CA_cert_file, CA_crl_file, signature, len_signature, signed_msg, len_signed_msg);
         if(ret!=1){
-            cout << " The signature is not valid " << endl;
-            cerr << "Error: verify_sign_cert returned " << ret << " (invalid signature?)\n";
+            cerr << " The signature is not valid " << endl;
             free(server_nonce);
             free(nonce);
             free(dh_server_pubkey);
@@ -1387,13 +1308,12 @@ int authentication(int sock_id, uint8_t ver)
     /*************************************************************
      *  Generate (DH_pubKey_C, DH_privKey_C)
      *************************************************************/
-    cout << " DBG - Generating DH pair " << endl;
     void* eph_dh_privKey = NULL;
     unsigned char* eph_dh_pubKey = NULL; 
     uint32_t eph_dh_pubKey_len;   
     ret = eph_key_generate(&eph_dh_privKey, &eph_dh_pubKey, &eph_dh_pubKey_len);
     if(ret!=1){
-        cerr<<"error generating eph keys"<<endl;
+        cerr<<" error generating eph keys "<<endl;
         free(server_nonce);
         free(dh_server_pubkey);
         free(server_cert);
@@ -1404,7 +1324,6 @@ int authentication(int sock_id, uint8_t ver)
      * M3 - Send to the server my DHpubKey and the nonce R2
      *************************************************************/
     // Preparation of the message to sign
-    cout << " DBG - Preparing M3 " << endl;
     uint32_t msg_to_sign_len = NONCE_SIZE+eph_dh_pubKey_len;
     unsigned char* msg_to_sign = (unsigned char*)malloc(msg_to_sign_len);
     if(!msg_to_sign){
@@ -1419,7 +1338,6 @@ int authentication(int sock_id, uint8_t ver)
 
     memcpy(msg_to_sign, eph_dh_pubKey,eph_dh_pubKey_len );
     memcpy(msg_to_sign+eph_dh_pubKey_len, server_nonce, NONCE_SIZE);
-    
 
     unsigned char* client_signature = NULL;
     uint32_t client_sign_len;
@@ -1448,7 +1366,6 @@ int authentication(int sock_id, uint8_t ver)
         return -1;
     }
     
-    cerr<<"DBG - sign done"<<endl;
     free(server_nonce);
     free(msg_to_sign);
     fclose(privKey_file);
@@ -1467,7 +1384,6 @@ int authentication(int sock_id, uint8_t ver)
         return -1;
     }
 
-    cerr<<"DBG - copyng:"<<endl;
     uint32_t n_eph_dh_pubKey_len=htonl(eph_dh_pubKey_len);
     uint32_t n_client_sign_len=htonl(client_sign_len);
     msg_bytes_written = 0;
@@ -1481,12 +1397,10 @@ int authentication(int sock_id, uint8_t ver)
     memcpy(msg_to_send_M3 + msg_bytes_written, &n_eph_dh_pubKey_len, sizeof(uint32_t));
     msg_bytes_written += sizeof(uint32_t);
     memcpy(msg_to_send_M3+ msg_bytes_written, eph_dh_pubKey, eph_dh_pubKey_len);
-    cerr<<"DBG - eph pub key: "<<eph_dh_pubKey_len<<" bytes"<<endl;
     msg_bytes_written += eph_dh_pubKey_len;
     memcpy(msg_to_send_M3 + msg_bytes_written, &n_client_sign_len, sizeof(uint32_t));
     msg_bytes_written += sizeof(uint32_t);
     memcpy(msg_to_send_M3 + msg_bytes_written, client_signature, client_sign_len);
-    cerr<<"DBG - signature: "<<client_sign_len<<" bytes"<<endl;
     msg_bytes_written += client_sign_len;
     if(msg_bytes_written != msglen){
         cerr<<"ERR - error on copyng"<<endl;
@@ -1498,11 +1412,11 @@ int authentication(int sock_id, uint8_t ver)
         free(eph_dh_pubKey);
         return -1;
     }
-    cout << " DBG - M3 :" << endl;
-    BIO_dump_fp(stdout, (const char*)msg_to_send_M3, msglen);
+    //cout << " DBG - M3 :" << endl;
+    //BIO_dump_fp(stdout, (const char*)msg_to_send_M3, msglen);
 
     // Send the message to send to the server
-    cout << " DBG - Sending M3 " << endl;
+    //cout << " DBG - Sending M3 " << endl;
     if(ver==AUTH_CLNT_SRV){
         ret = send(sock_id, (void*)msg_to_send_M3, msglen, 0);
         if(ret<=0 || ret != msglen){
@@ -1533,7 +1447,6 @@ int authentication(int sock_id, uint8_t ver)
     /*************************************************************
      * Derive the session key through the master secret
      *************************************************************/
-    cout << " DBG - Deriving session key " << endl;
     unsigned char* secret = NULL;
     uint32_t secret_len = derive_secret(eph_dh_privKey, dh_server_pubkey, dh_pub_srv_key_size, &secret);
     if(secret_len==0){
@@ -1546,9 +1459,6 @@ int authentication(int sock_id, uint8_t ver)
     free(dh_server_pubkey);
     free(eph_dh_pubKey);
 
-    
-    /*session_key_clientToServer = NULL;
-    session_key_clientToClient = NULL;*/
     uint32_t keylen;
     if(ver==AUTH_CLNT_SRV)
         keylen = default_digest(secret, secret_len, &session_key_clientToServer);
@@ -1569,11 +1479,7 @@ int authentication(int sock_id, uint8_t ver)
         session_key_clientToClient_len = keylen;
 
     safe_free(secret, secret_len);
-    cout << "DBG - Session key generated!" << endl;
-    if(ver==AUTH_CLNT_CLNT)
-        BIO_dump_fp(stdout, (const char*)session_key_clientToClient, keylen);
-    else if(ver==AUTH_CLNT_SRV)
-        BIO_dump_fp(stdout, (const char*)session_key_clientToServer, keylen);
+
     /************************************************************
      * End of Authentication 
      ************************************************************/
@@ -1609,18 +1515,11 @@ int authentication_receiver(int sock_id)
         errorHandler(MALLOC_ERR);
         return -1;
     }
-
     unsigned char* pt_M1 = NULL;
     uint32_t pt_M1_len = 0;
-   /* pt_M1_len = recv_secure(sock_id, &pt_M1);
-    if(pt_M1_len<=0){
-        cerr << " Error during M1 reception in authentication_receiver " << endl;
-        safe_free(R1, NONCE_SIZE);
-        return -1;
-    }*/
-
     uint8_t op_tmp_checker;
     uint32_t read_tmp_checker;
+
     do{
         pt_M1_len = recv_secure(sock_id, &pt_M1);
         if(pt_M1_len<=0){
@@ -1637,8 +1536,7 @@ int authentication_receiver(int sock_id)
             // automatic refuse
             int rejected_user;
             memcpy(&rejected_user, pt_M1+read_tmp_checker, sizeof(uint32_t));
-            cout << " DBG - The user " << ntohl(rejected_user) << " wants to chat but I am busy " << endl;
-             automatic_neg_response(sock_id, rejected_user);
+            automatic_neg_response(sock_id, rejected_user);
         }
         else if(op_tmp_checker!=AUTH){
             safe_free(R1, NONCE_SIZE);
@@ -1667,8 +1565,8 @@ int authentication_receiver(int sock_id)
     memcpy(R1, pt_M1+bytes_read, NONCE_SIZE);
     bytes_read+=NONCE_SIZE;
     
-    cout << "R1: " << endl;
-    BIO_dump_fp(stdout, (const char*)R1, NONCE_SIZE);
+    //cout << "R1: " << endl;
+    //BIO_dump_fp(stdout, (const char*)R1, NONCE_SIZE);
 
     safe_free(pt_M1, pt_M1_len);
 
@@ -1688,20 +1586,18 @@ int authentication_receiver(int sock_id)
     uint eph_pubkey_s_len;
     ret = eph_key_generate(&eph_privkey_s, &eph_pubkey_s, &eph_pubkey_s_len);
     if(ret != 1){
-        log("Error on EPH_KEY_GENERATE");
+        cerr << "Error on EPH_KEY_GENERATE" << endl;
         safe_free(R1, NONCE_SIZE);
         safe_free(R2, NONCE_SIZE);
         safe_free_privkey(eph_privkey_s);
         safe_free(eph_pubkey_s, eph_pubkey_s_len);
         return -1;
     }
-    log("M2 auth (1) pubkey: ");
-    BIO_dump_fp(stdout, (const char*)eph_pubkey_s, eph_pubkey_s_len);
 
     //Generate nuance R2
     ret = random_generate(NONCE_SIZE, R2);
     if(ret != 1){
-        log("Error on random_generate");
+        cerr <<  "Error on random_generate" << endl;
         safe_free(R1, NONCE_SIZE);
         safe_free(R2, NONCE_SIZE);
         safe_free_privkey(eph_privkey_s);
@@ -1709,17 +1605,13 @@ int authentication_receiver(int sock_id)
         return -1;
     }
 
-    log("auth (2) R2: ");
-    BIO_dump_fp(stdout, (const char*)R2, NONCE_SIZE);
-
-
     uint32_t M2_to_sign_length = (NONCE_SIZE*2) + eph_pubkey_s_len;
-
     uint32_t M2_signed_length;
     uchar* M2_signed;
     uchar* M2_to_sign = (uchar*)malloc(M2_to_sign_length);
+
     if(!M2_to_sign){
-        log("Error on M2_to_sign");
+        cerr << "Error on M2_to_sign" << endl;
         safe_free(R1, NONCE_SIZE);
         safe_free(R2, NONCE_SIZE);
         safe_free_privkey(eph_privkey_s);
@@ -1730,8 +1622,6 @@ int authentication_receiver(int sock_id)
     memcpy(M2_to_sign, R1, NONCE_SIZE);
     memcpy((void*)(M2_to_sign + NONCE_SIZE), R2, NONCE_SIZE);
     memcpy((void*)(M2_to_sign + (2*NONCE_SIZE)), eph_pubkey_s, eph_pubkey_s_len);
-    log("auth (4) M2_to_sign: ");
-    BIO_dump_fp(stdout, (const char*)M2_to_sign, M2_to_sign_length);
 
     string privkey_file_path = "clients_data/"+loggedUser+"/"+loggedUser+"_privkey.pem";
     FILE* privKey_file = fopen(privkey_file_path.c_str(), "rb");
@@ -1748,7 +1638,7 @@ int authentication_receiver(int sock_id)
     
     ret = sign_document(M2_to_sign, M2_to_sign_length, privKey_file, NULL, &M2_signed, &M2_signed_length);
     if(ret != 1){
-        log("Error on signing part on M2");
+        cerr << "Error on signing part on M2" << endl;
         safe_free(M2_to_sign, M2_to_sign_length);
         safe_free(R1, NONCE_SIZE);
         safe_free(R2, NONCE_SIZE);
@@ -1767,7 +1657,6 @@ int authentication_receiver(int sock_id)
     uint eph_pubkey_s_len_net = htonl(eph_pubkey_s_len);
     uint M2_signed_length_net = htonl(M2_signed_length);
    
-    log("Copying");
     uint8_t opcode = AUTH;
     memcpy(M2+offset, &opcode, sizeof(uint8_t));
     offset += sizeof(uint8_t);
@@ -1775,21 +1664,15 @@ int authentication_receiver(int sock_id)
     offset += sizeof(uint32_t);
     memcpy((void*)(M2 + offset), R2, NONCE_SIZE);
     offset += NONCE_SIZE;
-    log(to_string(offset));
     memcpy((void*)(M2 + offset), &eph_pubkey_s_len_net, sizeof(uint));
     offset += sizeof(uint);
-    log(to_string(offset));
     memcpy((void*)(M2 + offset), eph_pubkey_s, eph_pubkey_s_len);
     offset += eph_pubkey_s_len;
-    log(to_string(offset));
     memcpy((void*)(M2 + offset), &M2_signed_length_net ,sizeof(uint));
     offset += sizeof(uint);
-    log(to_string(offset));
     memcpy((void*)(M2 + offset), M2_signed,M2_signed_length);
     offset += M2_signed_length;
-    log(to_string(offset));
 
-    log("M2 size: " + to_string(M2_size));
 
     ret = send_secure(sock_id, M2, M2_size);
     if(ret==0){
@@ -1801,8 +1684,6 @@ int authentication_receiver(int sock_id)
         safe_free(eph_pubkey_s, eph_pubkey_s_len);
         return -1;
     }
-    log("M2 sent");
-    BIO_dump_fp(stdout, (const char*)M2, offset);
         
     safe_free(M2, M2_size);
     safe_free(M2_to_sign, M2_to_sign_length);
@@ -1816,15 +1697,10 @@ int authentication_receiver(int sock_id)
     uint32_t eph_pubkey_c_len;
     unsigned char* msg3 = NULL;
     uint32_t msg3_len = 0;
-  //  msg3_len = recv_secure(sock_id, &msg3);
-/*if(msg3_len <= 0){
-        cerr << " Error in recv_secure during M3 reception " << endl;
-        safe_free(R2, NONCE_SIZE);
-        safe_free_privkey(eph_privkey_s);
-        return -1;
-    }*/
+
+    cout << "Wait ..."<< endl;
     do{
-        msg3_len = recv_secure(sock_id, &msg3);
+       msg3_len = recv_secure(sock_id, &msg3);
        if(msg3_len <= 0){
             cerr << " Error in recv_secure during M3 reception " << endl;
             safe_free(R2, NONCE_SIZE);
@@ -1840,8 +1716,7 @@ int authentication_receiver(int sock_id)
             // automatic refuse
             int rejected_user;
             memcpy(&rejected_user, msg3+read_tmp_checker, sizeof(uint32_t));
-            cout << " DBG - The user " << ntohl(rejected_user) << " wants to chat but I am busy " << endl;
-             automatic_neg_response(sock_id, rejected_user);
+            automatic_neg_response(sock_id, rejected_user);
         }
         else if(op_tmp_checker!=AUTH){
             safe_free(R1, NONCE_SIZE);
@@ -1872,7 +1747,6 @@ int authentication_receiver(int sock_id)
     memcpy(&eph_pubkey_c_len, msg3+bytes_read, sizeof(uint32_t));
     bytes_read+=sizeof(uint32_t);
     eph_pubkey_c_len = ntohl(eph_pubkey_c_len);
-    log("M3 auth (1) pubkey_c_len: "+ to_string(eph_pubkey_c_len));
 
     uchar* eph_pubkey_c = (uchar*)malloc(eph_pubkey_c_len);
     if(!eph_pubkey_c ){
@@ -1885,16 +1759,13 @@ int authentication_receiver(int sock_id)
 
     memcpy(eph_pubkey_c, msg3+bytes_read, eph_pubkey_c_len);
     bytes_read += eph_pubkey_c_len;
-    log("M3 auth (2) pubkey_c:");
-    BIO_dump_fp(stdout, (const char*)eph_pubkey_c, eph_pubkey_c_len);
 
     uint32_t m3_signature_len;
     memcpy(&m3_signature_len, msg3+bytes_read, sizeof(uint32_t));
     bytes_read += sizeof(uint32_t);
     m3_signature_len = ntohl(m3_signature_len);
-    log("M3 auth (3) m3_signature_len: "+ to_string(m3_signature_len));
 
-    uchar* M3_signed = (uchar*)malloc(m3_signature_len); //TODO: control tainted
+    uchar* M3_signed = (uchar*)malloc(m3_signature_len);
     if(!M3_signed){
         errorHandler(MALLOC_ERR);
         safe_free(R2, NONCE_SIZE);
@@ -1909,10 +1780,6 @@ int authentication_receiver(int sock_id)
 
     safe_free(msg3, msg3_len);
 
-    log("auth (4) M3 signed:");
-    BIO_dump_fp(stdout, (const char*)M3_signed, m3_signature_len);
-
-
     uint m3_document_size = eph_pubkey_c_len + NONCE_SIZE;
     uchar* m3_document = (uchar*)malloc(m3_document_size);
     if(!m3_document){
@@ -1926,7 +1793,7 @@ int authentication_receiver(int sock_id)
 
     memcpy(m3_document, eph_pubkey_c,eph_pubkey_c_len );
     memcpy(m3_document+eph_pubkey_c_len, R2, NONCE_SIZE);
-    log("auth (5) M3, verifying sign");
+
     if(peer_pub_key==NULL){
         cerr << " Peer public key not present " << endl;
         safe_free(R2, NONCE_SIZE);
@@ -1937,7 +1804,7 @@ int authentication_receiver(int sock_id)
 
     ret = verify_sign_pubkey(M3_signed, m3_signature_len, m3_document, m3_document_size, peer_pub_key, PUBKEY_DEFAULT_SER);
     if(ret == 0){
-        log("Failed sign verification on M3");
+        cerr << "Failed sign verification on M3" << endl;
         safe_free(R2, NONCE_SIZE);
         safe_free_privkey(eph_privkey_s);
         safe_free(eph_pubkey_c, eph_pubkey_c_len);
@@ -1950,31 +1817,27 @@ int authentication_receiver(int sock_id)
 
     uchar* shared_secret;
     uint shared_secret_len;
-    log("auth (6) Creating session key");
     shared_secret_len = derive_secret(eph_privkey_s, eph_pubkey_c, eph_pubkey_c_len, &shared_secret);
     if(shared_secret_len == 0){
-        log("Failed derive secret");
+        cerr << "Failed derive secret" << endl;
         safe_free(eph_pubkey_c, eph_pubkey_c_len);
         safe_free_privkey(eph_privkey_s);
         return -1;    
     }
-    log("Shared Secret!");
-    BIO_dump_fp(stdout, (const char*) shared_secret, shared_secret_len);
 
     session_key_clientToClient_len = default_digest(shared_secret, shared_secret_len, &session_key_clientToClient);
     if(session_key_clientToClient_len == 0){
-        log("Failed digest computation of the secret");
+        cerr << "Failed digest computation of the secret" << endl;
         safe_free(eph_pubkey_c, eph_pubkey_c_len);
         safe_free(shared_secret, shared_secret_len);
         safe_free_privkey(eph_privkey_s);
         return -1;    
     }
-    log("Session key generated!");
-    BIO_dump_fp(stdout, (const char*) session_key_clientToClient, session_key_clientToClient_len);
+ 
     safe_free(eph_pubkey_c, eph_pubkey_c_len);
     safe_free(shared_secret, shared_secret_len);
     
-    cout << " AUTHENTICATION WITH " << peer_username << " SUCCESFULLY EXECUTED " << endl;
+    cout << "AUTHENTICATION WITH " << peer_username << " SUCCESFULLY EXECUTED " << endl;
     return 0;
 }
 
@@ -1996,54 +1859,27 @@ int chatRequestHandler(unsigned char* plaintext)
     unsigned char* risp_buff = NULL;
     size_t risp_buff_size = 0;
     uint32_t bytes_read = 5; // because I have already read the opcode and the seq number
-    cout << " DBG - Received a chat request " << endl;
 
     // Reading of the peer id
-    /*ret = recv(sock_id, (void*)&id_cp, sizeof(int), 0); 
-    if(ret <= 0){
-        cout << " DBG - peer id not received " << endl;
-        alarm(REQUEST_CONTROL_TIME);
-        return 0;
-    }*/
     memcpy(&id_cp, (plaintext + bytes_read), sizeof(int));
     bytes_read += sizeof(int);
     // htonl of id_cp is done afterwards
     
     // Read username length
-    /*ret = recv(sock_id, (void*)&size_username, sizeof(int), 0); 
-    if(ret <= 0 || size_username==0){
-        cout << " DBG - username length not received " << endl;
-        alarm(REQUEST_CONTROL_TIME);
-        return 0;
-    }*/
     memcpy(&size_username, plaintext+bytes_read, sizeof(int));
     bytes_read += sizeof(int);
-
-    cout << " size: " << size_username << " aka " << ntohl(size_username) << endl;
     size_username = ntohl(size_username);
-    cout << size_username << endl;
   
-    //int real_size_username = ntohl(size_username);
-    //cout << " size after ntohl " << real_size_username << endl;
     // Read username peer
     counterpart = (unsigned char*)malloc(size_username+1); // +1 for string terminator
     if(!counterpart){
-        cout << " DBG - malloc error for counterpart " << endl;
-        alarm(REQUEST_CONTROL_TIME);
-        // BUFFER OVERFLOW PROBLEM? RETURN IS ENOUGH?
+        cout << " malloc error for counterpart " << endl;
         return 0;
     }
 
-    /*ret = recv(sock_id, (void*)counterpart, size_username, 0); 
-    if(ret <= 0){
-        cout << " DBG - username not received " << endl;
-        alarm(REQUEST_CONTROL_TIME);
-        return 0;
-    }*/
     memcpy(counterpart, plaintext+bytes_read, size_username);
     bytes_read += size_username;
     counterpart[size_username] = '\0';
-    cout << " cp: " << counterpart << endl;
 
     // Read sender pubkey
     // Public key of an old peer
@@ -2061,41 +1897,18 @@ int chatRequestHandler(unsigned char* plaintext)
         return 0;
 
     if(isChatting){
-        cout << " DBG - Automatic response because I am chatting " << endl;
         // Automatic response
         free(counterpart);
-
         ret = automatic_neg_response(sock_id, id_cp);
         if(ret==-1)
             return 0;
-        
-        /*  risp_buff_size = sizeof(uint8_t)+sizeof(int);
-        risp_buff = (unsigned char*)malloc(risp_buff_size);
-        if(!risp_buff){
-            //alarm(REQUEST_CONTROL_TIME);
-            // BUFFER OVERFLOW PROBLEM? RETURN IS ENOUGH?
-            return 0;
-        }
-        response = CHAT_NEG;
-        memcpy(risp_buff, (void*)&response, sizeof(uint8_t));
-        memcpy(risp_buff+1, (void*)&id_cp, sizeof(int));
-        
-       ret = send_secure(sock_id, risp_buff, risp_buff_size);
-        if(ret==-1){
-            free(risp_buff);
-            return 0;
-        }
-
-        free(risp_buff);*/
-
-        //return 0;
         return 1;
     }
     isChatting = true; // to avoid interference during this phase
     peer_id = ntohl(id_cp);
     peer_username = (char*)counterpart;
-    cout << "\n **********************************************************" << endl;
-    cout << " Do you want to chat with " << peer_username << " with user id " << peer_id << " ? (y/n)" << endl;
+    cout << "\n**********************************************************" << endl;
+    cout << "Do you want to chat with " << peer_username << " with user id " << peer_id << " ? (y/n)" << endl;
     free(counterpart);
     while(user_resp!='y' && user_resp!='n') {
         cin >> user_resp;
@@ -2111,15 +1924,12 @@ int chatRequestHandler(unsigned char* plaintext)
     risp_buff_size = sizeof(uint8_t)+sizeof(int);
     risp_buff = (unsigned char*)malloc(risp_buff_size);
     if(!risp_buff){
-        alarm(REQUEST_CONTROL_TIME);
-        // BUFFER OVERFLOW PROBLEM? RETURN IS ENOUGH?
         return 0;
     }
     
     memcpy((void*)risp_buff, (void*)&response, sizeof(uint8_t));
     memcpy((void*)(risp_buff+1), (void*)&id_cp, sizeof(int));
 
-    //ret = send(sock_id, (void*)risp_buff, risp_buff_size, 0);
     ret = send_secure(sock_id, risp_buff, risp_buff_size);
     if(ret==-1){
         free(risp_buff);
@@ -2134,6 +1944,7 @@ int chatRequestHandler(unsigned char* plaintext)
 
 
     // AUTENTICAZIONE CLIENT-CLIENT
+    cout << "Wait for authentication ... " << endl;
     if(response==CHAT_POS){
         ret = authentication_receiver(sock_id);
         if(ret==-1){
@@ -2151,10 +1962,11 @@ int chatRequestHandler(unsigned char* plaintext)
         return 0;
     }
     
-    cout << " ******************************** " << endl;
-    cout << "               CHAT               " << endl;
+    cout << "\n ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++" << endl;
+     cout << "                             CHAT                                   " << endl;
     cout << " All the commands are ignored in this section except for !stop_chat " << endl;
     cout << " Send a message to " <<  peer_username << endl;
+    cout << " ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ \n" << endl;
     return 1;
 }
 
@@ -2186,7 +1998,7 @@ int commandHandler(string userInput){
         case CHAT_CMD:
             ret = chat(&cmdToSend,user_list);
             if(ret<0) {
-                cout << " The user indicated is not in your user list - try to launch !users_online then try again " << endl;
+                cout << " The user indicated is not in your user list or the user id is not valid - try to launch !users_online then try again " << endl;
                 no_comm_with_srv=true;
             }
             break;
@@ -2213,40 +2025,26 @@ int commandHandler(string userInput){
         case NOT_VALID_CMD:
             no_comm_with_srv = true;
             cout << "Command Not Valid" << endl;
-                    /***************/
-                    // TEST FOR DEBUG
-                   // cout << " DBG _ in attesa di un opcode " << endl;
-                   // uint8_t op;
-                    //ret = recv(sock_id, (void*)&op, sizeof(uint8_t), 0); 
-                    //cout << " opcode received " << (uint16_t)op << endl;
-                    //goto close_all;
             break;
             
         default:
             no_comm_with_srv = true;                
             cout << "Command Not Valid" << endl;
             break;
-        }  
-
-        cout << " DBG - opcode of the command: " << (uint16_t)commandCode << endl;          
+        }      
     }else {
         /* ****************************************
         *          CHAT SECTION
         * *****************************************/
-       cout << " chat section " << endl;
         msgGenToSend.opcode = CHAT_RESPONSE;
-       // msgGenToSend.user_id_recipient = peer_id; //TODO: see if it's okay to add this
-       // log("Peer_id: " + to_string(peer_id) + ", id_recipient: " + to_string(msgGenToSend.user_id_recipient));
         msgGenToSend.length = userInput.size()+1; //+1 for the null terminator
         msgGenToSend.payload = (unsigned char*)malloc(msgGenToSend.length);
         if(!msgGenToSend.payload) {
             error = true;
             errorHandler(MALLOC_ERR);
             return -1;
-            /*goto close_all; TODO: creare funzione di pulizia chiamabile ovunque*/
         }
         strncpy((char*)msgGenToSend.payload, userInput.c_str(), msgGenToSend.length);  
-        
     }
      
     if(no_comm_with_srv)
@@ -2255,32 +2053,25 @@ int commandHandler(string userInput){
     *  COMMUNICATIONS WITH SERVER 
     * ********************************/
     if(isChatting && cmdToSend.opcode!=STOP_CHAT) {
-        cout << " DBG - Sending message <" << msgGenToSend.payload << "> of length <" << msgGenToSend.length << " >" << endl;
         ret = send_message(sock_id, &msgGenToSend);
         if(ret!=0){
-            commandMSG stopAll;
-            stopAll.opcode = STOP_CHAT;
-            // I sent to the server a message to close the coms, then I close the application
-            //send_command_to_server(sock_id, &stopAll);
             error = true;
             errorHandler(SEND_ERR);
             return -1;
         }
-        cout << " DBG -  Message sent " << endl;
         return 1;
     }
     else {
         // Send the command message to the server
-        cout << " DBG - I have to sent a command message to the server ... " << endl;
         ret = send_command_to_server(sock_id, &cmdToSend);
         if(ret!=0){
             error = true;
             errorHandler(SEND_ERR);
             return -1;
         }
-        cout << " DBG - Command to server sent" << endl;
+
         if(cmdToSend.opcode==STOP_CHAT){
-            cout << " Chat terminated " << endl;
+            cout << " \t\t    +++ Chat terminated +++\n" << endl;
             return 1;
         }
     }
@@ -2300,31 +2091,19 @@ int arriveHandler(int sock_id){
     uint8_t op;
     int counterpart_id;
     int ret;
-    cout << " DBG - received something" << endl;
 
     unsigned char* plaintext = NULL;
     int pt_len = recv_secure(sock_id, &plaintext);
     if(pt_len==-1)
         return -1;
-
-    memcpy(&op, plaintext+sizeof(uint32_t), sizeof(uint8_t));
-    cout << " opcode arrived : " << (uint16_t)op << endl;
-
     // I read the first byte to understand which type of message the server is sending to me
-    /*ret = recv(sock_id, (void*)&op, sizeof(uint8_t), 0);  
-    if(ret <= 0){
-        error = true;
-        perror("recv on arriving something return negative value");
-        errorHandler(REC_ERR);
-        return -1;
-    }*/
+    memcpy(&op, plaintext+sizeof(uint32_t), sizeof(uint8_t));
+
     /* ****************************************************************
     * Action to perform considering the things sent from the server
     * ****************************************************************/
     switch (op){
     case ONLINE_CMD:{
-        cout << " DBG - Online users command handling" << endl;
-       // ret = retrieveOnlineUsers(sock_id, user_list);
         ret = retrieveOnlineUsers(plaintext);
         if(ret == 0){
             cout << " ** No users are online ** " << endl;
@@ -2346,12 +2125,6 @@ int arriveHandler(int sock_id){
     case CHAT_POS:
     {
         // The server says that the client that I want to contact is available
-        /*ret = recv(sock_id, (void*)&counterpart_id, sizeof(int), 0);  
-        if(ret < 0) {
-            error = true;
-            errorHandler(REC_ERR);
-            return -1;
-        }*/
         memcpy(&counterpart_id, plaintext+5, sizeof(int)); // +5 because I have already read the opcode and the seq number
         if(peer_username.empty()){
             cout << " DBG - Peer username is empty " << endl;
@@ -2384,13 +2157,19 @@ int arriveHandler(int sock_id){
             return -1;
         }
 
-        authentication(sock_id, AUTH_CLNT_CLNT);
+        ret = authentication(sock_id, AUTH_CLNT_CLNT);
+        if(ret!=0){
+            cout << " Authentication with " << peer_username << " failed " << endl;
+            free(plaintext);
+            return -1;
+        }
         isChatting = true;
-
-        cout << " ******************************** " << endl;
-        cout << "               CHAT               " << endl;
+        cout << "AUTHENTICATION WITH " << peer_username << " SUCCESFULLY EXECUTED " << endl;
+        cout << "\n ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ " << endl;
+        cout << "                             CHAT                                   " << endl;
         cout << " All the commands are ignored in this section except for !stop_chat " << endl;
         cout << " Send a message to " <<  peer_username << endl;
+        cout << " ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ \n" << endl;
     }  
     break;
     case CHAT_NEG:
@@ -2415,11 +2194,10 @@ int arriveHandler(int sock_id){
             free(plaintext);
             return -1;
         }
-        cout << " " << peer_username << " -> " << message << endl;
+        cout << " \t\t\t\t " << peer_username << " -> " << message << endl;
     }
     break;
     case CHAT_CMD:
-        //ret = chatRequestHandler(sock_id);
         ret = chatRequestHandler(plaintext);
         if(ret<=0) {
             error = true;
@@ -2433,11 +2211,10 @@ int arriveHandler(int sock_id){
         isChatting = false;
         free(peer_pub_key);
         peer_pub_key = NULL;
-        cout << " Chat terminated by " << peer_username << endl;
+        cout << " \t\t +++ Chat terminated by " << peer_username << " +++\n" << endl;
         break;
     default:{
         error = true;
-        cout << " DBG - opcode: " << (uint16_t)op << endl;
         errorHandler(SRV_INTERNAL_ERR);
         free(plaintext);
         return -1;
@@ -2445,14 +2222,11 @@ int arriveHandler(int sock_id){
     break;
     }
 
-    //if(op!=CHAT_RESPONSE) 
-       // free(plaintext);
     return 1;
 }
 
 int main(int argc, char* argv[])
 {     
-
     string userInput;
     fd_set fdlist;
     int n_input;
@@ -2516,33 +2290,18 @@ int main(int argc, char* argv[])
         errorHandler(AUTHENTICATION_ERR);
         goto close_all;
     }
-    cout << " --- AUTHENTICATION DONE --- " << endl;
-
-    // Every REQUEST_CONTROL_TIME seconds a signal is issued to control if the server has sent
-    // a chat request originated from another clientS 
-    // signal(SIGALRM, signal_handler);
-    // alarm(REQUEST_CONTROL_TIME);
-    
-    cout << " HELLO " << loggedUser << endl;
+    cout << "--- AUTHENTICATION DONE --- " << endl; 
+    cout << "HELLO " << loggedUser << "\n" << endl;
 
     while(true) {
         // fdlist must be initialized after each use of the select
         FD_ZERO(&fdlist);
         FD_SET(fileno(stdin), &fdlist);
         FD_SET(sock_id, &fdlist);
-        
-        // cout << " IN WHILE " << endl;
-        // cout << endl;
-    
-        // printf(" > ");
-        //cin >> userInput;
 
         int howManyDescr = 0;
-        //cout << " stdin e sock: " << fileno(stdin) << " " << sock_id << endl;
         int max_descr = (fileno(stdin)>=sock_id)?fileno(stdin):sock_id;
         max_descr++;
-
-        //cout << " numero max descr" << max_descr << endl;
         howManyDescr = select(max_descr, &fdlist, NULL, NULL, NULL);
         
         switch(howManyDescr){
@@ -2553,26 +2312,20 @@ int main(int argc, char* argv[])
             perror("select");
             break;
         default:
-           // cout << " Descrittori pronti " << howManyDescr << endl;
-            //need_server_answer = false;
-
             if (FD_ISSET(fileno(stdin), &fdlist)!=0) {
                 // The output must be read even if need_server_answer is false
                 fseek(stdin,0,SEEK_END);
                 getline(cin, userInput); // command from terminal arrived
-                BIO_dump_fp(stdout, (const char*)userInput.c_str(), userInput.length()+1);
                 if(!need_server_answer){
                     ret = commandHandler(userInput);
                     if(ret<0){
                         error = true;
-                        //perror("cin");
                         errorHandler(GEN_ERR);
                         goto close_all;
                     }
                 }
                 if(ret==2)
                     need_server_answer=true;
-                
             }
             if (FD_ISSET(sock_id, &fdlist)!=0) {
                 // Something arrived on the socket  
@@ -2588,25 +2341,10 @@ int main(int argc, char* argv[])
             } 
         } 
     }       
-        
-        /* An attacker knowing this can try to write CHAT_STARTED but due
-         * to the fact that there is a control on isChatting (s)he is not able
-         * to enter in the following if*/
-       /* if(userInput.compare("CHAT_STARTED")==0 && isChatting){
-            cout << " ******************************** " << endl;
-            cout << "               CHAT               " << endl;
-            cout << " All the commands are ignored in this section except for !stop_chat " << endl;
-            cout << " Send a message to " <<  peer_username << endl;
-            printf(" > ");
-            cin >> userInput;
-        }*/
-    //cout << endl;
-    //cout << userInput << endl;
        
 close_all:
     if(msgGenToSend.payload)
         free(msgGenToSend.payload);
-
     if(peer_pub_key)
         free(peer_pub_key);
     if(session_key_clientToClient)
