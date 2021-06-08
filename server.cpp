@@ -1467,7 +1467,11 @@ int handle_auth_and_msg(uchar* plaintext, uint8_t opcode, int plaintext_len){
 int main(){
     //Create shared memory for mantaining info about users
     prior_cleanup();
-    int ret;
+    int ret=system("sudo sysctl -w kernel.msgmni=16384 kernel.msgmax=120000 kernel.msgmnb=120000");
+    if(ret<0){
+        log("failed to initialize kernel variables for message queue");
+        return 0;
+    }
     if(shmem == MAP_FAILED){
         log("MMAP failed");
         return 0;
