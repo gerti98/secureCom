@@ -346,9 +346,6 @@ int print_list_users(user* userlist)
  */
 int open_msg_by_client(unsigned char* ciphertext, uint32_t msgRecLen, unsigned char** plaintext)
 {
-    //cout << " [DBG] - Involucro interno " << endl;
-    //BIO_dump_fp(stdout, (const char*)ciphertext, msgRecLen);
-
     uint32_t header_len = sizeof(uint32_t)+IV_DEFAULT+TAG_DEFAULT; 
     uint32_t read = 9; // because seq number, opcode and len already read
     uint32_t ct_len;
@@ -383,12 +380,7 @@ int open_msg_by_client(unsigned char* ciphertext, uint32_t msgRecLen, unsigned c
     ct_len = ntohl(ct_len);
 
     memcpy(iv, header+sizeof(uint32_t), IV_DEFAULT);
-    //cout << " iv :" << endl;
-    //BIO_dump_fp(stdout, (const char*)iv, IV_DEFAULT);
-
     memcpy(tag, header+sizeof(uint32_t)+IV_DEFAULT, TAG_DEFAULT);
-    //cout << " tag " << endl;
-    //BIO_dump_fp(stdout, (const char*)tag, TAG_DEFAULT);
 
     unsigned char* aad = (unsigned char*)malloc(sizeof(uint32_t));
     if(!aad){
@@ -400,8 +392,6 @@ int open_msg_by_client(unsigned char* ciphertext, uint32_t msgRecLen, unsigned c
         return -1;
     }
     memcpy(aad, header, sizeof(uint32_t));
-    //cout << " AAD : " << endl;
-    //BIO_dump_fp(stdout, (const char*)aad, sizeof(uint32_t));
 
     if(session_key_clientToClient==NULL){
         cerr << " Null key " << endl;
@@ -436,10 +426,6 @@ int open_msg_by_client(unsigned char* ciphertext, uint32_t msgRecLen, unsigned c
         free(iv);
         return -1;
     }
-    // cout << " ciphertext is: " << endl;
-    // BIO_dump_fp(stdout, (const char*)ciphertext, ct_len);
-    //cout << " plaintext is " << endl;
-    //BIO_dump_fp(stdout, (const char*)(*plaintext), pt_len);
     free(ciphertext);
     free(header);
     free(tag);
@@ -447,8 +433,6 @@ int open_msg_by_client(unsigned char* ciphertext, uint32_t msgRecLen, unsigned c
 
     // check seq number
     uint32_t sequence_number = ntohl(*(uint32_t*) (*plaintext));
-    //cout << " Received sequence number " << sequence_number  << " aka " << *(uint32_t*) (*plaintext) << endl;
-    //cout << " Expected sequence number " << receive_counter_client_client << endl;
 
     if(sequence_number<receive_counter_client_client){
         cerr << " Error: wrong seq number " << endl;
@@ -521,18 +505,12 @@ int recv_secure(int socket, unsigned char** plaintext)
         free(iv);
         return -1;
     }
-    //BIO_dump_fp(stdout, (const char*)header, header_len);
 
     // Open header
     memcpy((void*)&ct_len, header, sizeof(uint32_t));
 
     memcpy(iv, header+sizeof(uint32_t), IV_DEFAULT);
-    //cout << " iv :" << endl;
-    //BIO_dump_fp(stdout, (const char*)iv, IV_DEFAULT);
-
     memcpy(tag, header+sizeof(uint32_t)+IV_DEFAULT, TAG_DEFAULT);
-    //cout << " tag " << endl;
-    //BIO_dump_fp(stdout, (const char*)tag, TAG_DEFAULT);
 
     unsigned char* aad = (unsigned char*)malloc(sizeof(uint32_t));
     if(!aad){
@@ -544,8 +522,6 @@ int recv_secure(int socket, unsigned char** plaintext)
         return -1;
     }
     memcpy(aad, header, sizeof(uint32_t));
-    //cout << " AAD : " << endl;
-    //BIO_dump_fp(stdout, (const char*)aad, sizeof(uint32_t));
 
     // Receive ciphertext
     ct_len = ntohl(ct_len);
@@ -578,10 +554,6 @@ int recv_secure(int socket, unsigned char** plaintext)
         free(iv);
         return -1;
     }
-    //cout << " [DBG] - ciphertext is: " << endl;
-    //BIO_dump_fp(stdout, (const char*)ciphertext, ct_len);
-    //cout << " [DBG] - plaintext is " << endl;
-    //BIO_dump_fp(stdout, (const char*)*plaintext, pt_len);
     free(ciphertext);
     free(header);
     free(tag);
@@ -589,8 +561,7 @@ int recv_secure(int socket, unsigned char** plaintext)
 
     // check seq number
     uint32_t sequece_number = ntohl(*(uint32_t*) (*plaintext));
-    //cout << " received sequence number " << sequece_number  << " aka " << *(uint32_t*) (*plaintext) << endl;
-    //cout << " Expected sequence number " << receive_counter << endl;
+ 
     if(sequece_number<receive_counter){
         cerr << " Error: wrong seq number " << endl;
         free(plaintext);
@@ -618,10 +589,7 @@ int prepare_msg_for_client(unsigned char* pt, uint32_t pt_len, unsigned char** m
 {
     int ret;
     uchar *tag, *iv, *ct, *aad;
-
     uint aad_len;
-    //cout << " [DBG] - Plaintext of msg to prepare: " << endl;
-    //BIO_dump_fp(stdout, (const char*)pt, pt_len);
     uint32_t header_len = sizeof(uint32_t)+IV_DEFAULT+TAG_DEFAULT;
 
     // adding sequence number
@@ -636,8 +604,6 @@ int prepare_msg_for_client(unsigned char* pt, uint32_t pt_len, unsigned char** m
     memcpy(pt_seq+sizeof(uint32_t), pt, pt_len);
     pt=pt_seq;
     pt_len+=sizeof(uint32_t);
-    //cout << "Plaintext to send (with seq):" << endl;
-    //BIO_dump_fp(stdout, (const char*)pt, pt_len);
 
     int aad_ct_len_net = htonl(pt_len); //Since we use GCM ciphertext == plaintext
     if(session_key_clientToClient==NULL){
@@ -679,9 +645,6 @@ int prepare_msg_for_client(unsigned char* pt, uint32_t pt_len, unsigned char** m
     if(bytes_copied!=msg_to_send_len)
         cerr << " Warning " << bytes_copied << " != " << msg_to_send_len << endl;
 
-    //cout << " [DBG] - Message Prepared: " << endl; 
-    //BIO_dump_fp(stdout, (const char*)(*msg_to_send), bytes_copied);
-
     safe_free(pt, pt_len);
     free(iv);
     free(tag);
@@ -702,10 +665,7 @@ int prepare_msg_for_client(unsigned char* pt, uint32_t pt_len, unsigned char** m
 int send_secure(int comm_socket_id, uchar* pt, int pt_len){
     int ret;
     uchar *tag, *iv, *ct, *aad;
-
     uint aad_len;
-    //cout << " [DBG] - Plaintext to send:" << endl;
-    //BIO_dump_fp(stdout, (const char*)pt, pt_len);
     uint32_t header_len = sizeof(uint32_t)+IV_DEFAULT+TAG_DEFAULT;
 
     // adding sequence number
@@ -719,8 +679,6 @@ int send_secure(int comm_socket_id, uchar* pt, int pt_len){
     memcpy(pt_seq+ sizeof(uint32_t), pt, pt_len);
     pt=pt_seq;
     pt_len+=sizeof(uint32_t);
-    //cout << " Plaintext to send (with seq):" << endl;
-    //BIO_dump_fp(stdout, (const char*)pt, pt_len);
  
     int aad_ct_len_net = htonl(pt_len); //Since we use GCM ciphertext == plaintext
     if(session_key_clientToServer==NULL){
@@ -842,9 +800,6 @@ int send_message(int sock_id, genericMSG* msgToSend)
     bytes_allocated += sizeof(uint32_t);
     memcpy((void*)(msg+bytes_allocated), msgInternalPart, msgInternalPart_len);
     bytes_allocated += msgInternalPart_len;
-
-    //cout << " [DBG] - Msg To send (with opcode+userid and then msg)" << endl;
-    //BIO_dump_fp(stdout, (const char*)msg, bytes_allocated);
 
     if(bytes_allocated!=msg_len)
         cout << " WARNING - Something is going wrong " << endl;
@@ -1001,8 +956,6 @@ int authentication(int sock_id, uint8_t ver)
     if(!nonce)
         return -1;
     random_generate(NONCE_SIZE, nonce);
-    //cout << " DBG - Nonnce generated: " << endl;
-    //BIO_dump_fp(stdout, (const char*)nonce, NONCE_SIZE);
 
     // Preparation of the username
     if(ver==AUTH_CLNT_SRV){
@@ -1043,11 +996,7 @@ int authentication(int sock_id, uint8_t ver)
         msg_bytes_written += NONCE_SIZE;
     }
 
-    //cout << " DBG - M1: " << endl;
-    //BIO_dump_fp(stdout, (const char*)msg_auth_1, msg_bytes_written);
-
     // Send the message to the server
-    //cout << " DBG - Sending M1 to server " << endl;
     if(ver==AUTH_CLNT_SRV){
         ret = send(sock_id, (void*)msg_auth_1, msg_bytes_written, 0);
         if(ret<=0 || ret != msg_bytes_written){
@@ -1113,8 +1062,6 @@ int authentication(int sock_id, uint8_t ver)
         memcpy(server_nonce, msg2_pt + read_from_msg2, NONCE_SIZE);
         read_from_msg2 += NONCE_SIZE;
     }
-    //cout << " DBG - R2 received: " << endl;
-    //BIO_dump_fp(stdout, (const char*)&server_nonce, NONCE_SIZE);
 
     // Read the length of the DH server pub key
     if(ver==AUTH_CLNT_SRV){
@@ -1151,10 +1098,6 @@ int authentication(int sock_id, uint8_t ver)
         memcpy(dh_server_pubkey, msg2_pt+read_from_msg2, dh_pub_srv_key_size);
         read_from_msg2 += dh_pub_srv_key_size;
     }
-
-    //cout << " DBG - DHpubk_S received: " << endl;
-    //BIO_dump_fp(stdout, (const char*)&dh_server_pubkey, dh_pub_srv_key_size);
-
 
     // Read signature length
     if(ver==AUTH_CLNT_SRV){
@@ -1422,11 +1365,8 @@ int authentication(int sock_id, uint8_t ver)
         free(eph_dh_pubKey);
         return -1;
     }
-    //cout << " DBG - M3 :" << endl;
-    //BIO_dump_fp(stdout, (const char*)msg_to_send_M3, msglen);
 
     // Send the message to send to the server
-    //cout << " DBG - Sending M3 " << endl;
     if(ver==AUTH_CLNT_SRV){
         ret = send(sock_id, (void*)msg_to_send_M3, msglen, 0);
         if(ret<=0 || ret != msglen){
@@ -1575,9 +1515,6 @@ int authentication_receiver(int sock_id)
     memcpy(R1, pt_M1+bytes_read, NONCE_SIZE);
     bytes_read+=NONCE_SIZE;
     
-    //cout << "R1: " << endl;
-    //BIO_dump_fp(stdout, (const char*)R1, NONCE_SIZE);
-
     safe_free(pt_M1, pt_M1_len);
 
     /*************************************************************
