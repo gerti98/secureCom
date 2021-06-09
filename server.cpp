@@ -259,6 +259,10 @@ int initialize_user_info(user_info* user_status){
 
 int get_user_id_by_username(string username){
     vlog("Entering get id by username");
+    if(username.empty()){
+        log("INVALID usernam on get_user_id_by_username");
+        return -1;
+    }
     sem_t* sem_id= sem_open(sem_user_store_name, O_CREAT, 0600, 1);
     if(-1 == sem_prologue(sem_id)){
         log("ERROR on sem_prologue");
@@ -284,7 +288,7 @@ int get_user_id_by_username(string username){
 
 
 /**
- * @return username or "" in case of errors
+ * @return username or empty string in case of errors
  */
 string get_username_by_user_id(size_t id){
     vlog("get username by id");
@@ -296,7 +300,7 @@ string get_username_by_user_id(size_t id){
     sem_t* sem_id= sem_open(sem_user_store_name, O_CREAT, 0600, 1);
     if(-1 == sem_prologue(sem_id)){
         log("ERROR on sem_prologue");
-        return "";
+        return string();
     }
 
     user_info* user_status = (user_info*)shmem;
@@ -304,7 +308,7 @@ string get_username_by_user_id(size_t id){
     vlog("Obtained username of " + username);
     if(-1 == sem_epilogue(sem_id)){
         log("ERROR on sem_epilogue");
-        return "";
+        return string();
     }
     return username;
 }
@@ -1243,7 +1247,7 @@ int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& re
 
     unsigned char chat_cmd = CHAT_CMD;
     string client_username = get_username_by_user_id(client_user_id);
-    if(client_username.compare("") == 0){
+    if(client_username.empty()){
         log("ERROR on get_username_by_user_id");
         return -1;
     }
@@ -1373,6 +1377,10 @@ int handle_chat_pos_neg(uchar* plaintext, uint8_t opcode){
     offset_relay += sizeof(int);
     if(opcode == CHAT_POS){
         string client_username = get_username_by_user_id(client_user_id);
+        if(client_username.empty()){
+            log("ERROR on get_username_by_user_id");
+            return -1;
+        }
         string pubkey_of_client_path = "certification/" + client_username + "_pubkey.pem";
         vlog("Opening " + pubkey_of_client_path);
         FILE* pubkey_of_client_file = fopen(pubkey_of_client_path.c_str(), "rb");
@@ -1560,7 +1568,7 @@ int main(){
                 return -1;
             }
             string client_username = get_username_by_user_id(client_user_id);
-            if(client_username.compare("") == 0){
+            if(client_username.empty()){
                 log("ERROR on get_username_by_user_id");
                 return -1;
             }

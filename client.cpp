@@ -175,7 +175,7 @@ string getUsernameFromID(int userId, user* userlist)
  */
 int chat(struct commandMSG* toSend, user* userlist)
 {
-    if(userlist==NULL)
+    if(userlist==NULL) //[SECURE CODING]: controllare toSend == null?
         return -1;
     toSend->opcode = CHAT_CMD; 
     cout << "\n******************************************************" << endl;
@@ -228,6 +228,7 @@ void free_list_users(struct user* userlist)
  */
 int retrieveOnlineUsers(unsigned char* plaintext)
 {
+    //[SECURE CODING]: controllare plaintext == null?
     if(user_list!=NULL){
         free_list_users(user_list);
         user_list = NULL;
@@ -346,6 +347,7 @@ int print_list_users(user* userlist)
  */
 int open_msg_by_client(unsigned char* ciphertext, uint32_t msgRecLen, unsigned char** plaintext)
 {
+    //[SECURE CODING]: controllare ciphertext == null?
     uint32_t header_len = sizeof(uint32_t)+IV_DEFAULT+TAG_DEFAULT; 
     uint32_t read = 9; // because seq number, opcode and len already read
     uint32_t ct_len;
@@ -470,6 +472,7 @@ int open_msg_by_client(unsigned char* ciphertext, uint32_t msgRecLen, unsigned c
  */
 int recv_secure(int socket, unsigned char** plaintext)
 {
+    //[SECURE CODING]: controllare che socket sia un valore valido (>= 0) ?
     uint32_t header_len = sizeof(uint32_t)+IV_DEFAULT+TAG_DEFAULT; 
     uint32_t ct_len;
     unsigned char* ciphertext = NULL;
@@ -587,6 +590,7 @@ int recv_secure(int socket, unsigned char** plaintext)
  */
 int prepare_msg_for_client(unsigned char* pt, uint32_t pt_len, unsigned char** msg_to_send)
 {
+    //[SECURE CODING]: controllare pt == null?
     int ret;
     uchar *tag, *iv, *ct, *aad;
     uint aad_len;
@@ -594,7 +598,7 @@ int prepare_msg_for_client(unsigned char* pt, uint32_t pt_len, unsigned char** m
 
     // adding sequence number
     uint32_t counter_n=htonl(send_counter_client_client);
-    uchar* pt_seq = (uchar*)malloc(pt_len+sizeof(uint32_t));
+    uchar* pt_seq = (uchar*)malloc(pt_len+sizeof(uint32_t)); //[SECURE CODING]: controllare unsigned wrap?
     if(!pt_seq){
         safe_free(pt, pt_len);
         return 0;
@@ -621,7 +625,7 @@ int prepare_msg_for_client(unsigned char* pt, uint32_t pt_len, unsigned char** m
         return 0;
     }
 
-    uint msg_to_send_len = ct_len + header_len, bytes_copied = 0;
+    uint msg_to_send_len = ct_len + header_len, bytes_copied = 0; //[SECURE CODING]: controllare unsigned wrap?
     *msg_to_send = (uchar*)malloc(msg_to_send_len);
     if(!(*msg_to_send)){
         errorHandler(MALLOC_ERR);
@@ -649,7 +653,7 @@ int prepare_msg_for_client(unsigned char* pt, uint32_t pt_len, unsigned char** m
     free(iv);
     free(tag);
     free(ct);
-    send_counter_client_client++;
+    send_counter_client_client++; //[SECURE CODING]: controllare unsigned wrap (per chiudere eventualmente sessione con client)?
     return bytes_copied;
 }
 
@@ -663,6 +667,7 @@ int prepare_msg_for_client(unsigned char* pt, uint32_t pt_len, unsigned char** m
  * @return 0 in case of error, 1 otherwise
  */
 int send_secure(int comm_socket_id, uchar* pt, int pt_len){
+    //[SECURE CODING]: controllare comm_socket_id > 0, pt == null ?
     int ret;
     uchar *tag, *iv, *ct, *aad;
     uint aad_len;
@@ -695,7 +700,7 @@ int send_secure(int comm_socket_id, uchar* pt, int pt_len){
         return 0;
     }
     
-    uint msg_to_send_len = ct_len + header_len, bytes_copied = 0;
+    uint msg_to_send_len = ct_len + header_len, bytes_copied = 0; //[SECURE CODING]: controllare unsigned wrap?
     uchar* msg_to_send = (uchar*)malloc(msg_to_send_len);
     if(!msg_to_send){
         errorHandler(MALLOC_ERR);
@@ -728,7 +733,7 @@ int send_secure(int comm_socket_id, uchar* pt, int pt_len){
         safe_free(msg_to_send, msg_to_send_len);
         return 0;
     }
-    send_counter++;
+    send_counter++; //[SECURE CODING]: controllare unsigned wrap (per eventualmente chiudere sessione) ?
 
     safe_free(msg_to_send, msg_to_send_len);
 
@@ -746,6 +751,7 @@ int send_secure(int comm_socket_id, uchar* pt, int pt_len){
  * */
 int send_command_to_server(int sock_id, commandMSG* cmdToSend)
 {
+     //[SECURE CODING]: controllare sock_id >= 0, cmdToSend == null ?
     uint32_t net_id;
     unsigned char* pt = NULL;
     uint32_t pt_len = (cmdToSend->opcode==CHAT_CMD || cmdToSend->opcode==STOP_CHAT)? sizeof(uint8_t)+sizeof(uint32_t) : sizeof(uint8_t);
@@ -780,11 +786,12 @@ int send_command_to_server(int sock_id, commandMSG* cmdToSend)
  */
 int send_message(int sock_id, genericMSG* msgToSend)
 {
+    //[SECURE CODING]: controllare sock_id >= 0, msgToSend == null ?
     unsigned char* msgInternalPart = NULL; // nonce for client + msg for client
     uint32_t msgInternalPart_len = prepare_msg_for_client(msgToSend->payload, msgToSend->length, &msgInternalPart);
     if(msgInternalPart_len==0)
         return -1;
-    uint32_t msg_len = msgInternalPart_len+sizeof(uint8_t)+sizeof(uint32_t);
+    uint32_t msg_len = msgInternalPart_len+sizeof(uint8_t)+sizeof(uint32_t); //[SECURE CODING]: control unsigned wrap ?
     unsigned char* msg = (unsigned char*)malloc(msg_len);
     if(!msg){
         safe_free(msgInternalPart, msgInternalPart_len);
@@ -828,6 +835,7 @@ int send_message(int sock_id, genericMSG* msgToSend)
  */
 int receive_message(int sock_id, string& msg, unsigned char* msgReceived, uint32_t msgReceived_len)
 {
+    //[SECURE CODING]: controllare sock_id >= 0, msgReceived == null ?
     unsigned char* pt = NULL;
     uint32_t pt_len = open_msg_by_client(msgReceived, msgReceived_len, &pt);
     if(pt_len<=0){
@@ -846,6 +854,7 @@ int receive_message(int sock_id, string& msg, unsigned char* msgReceived, uint32
  */
 int retrieve_my_userID(int socket)
 {
+    //[SECURE CODING]: controllare sock_id >= 0
     unsigned char* plaintext = NULL;
     int pt_len = recv_secure(sock_id, &plaintext);
     if(pt_len==-1)
@@ -876,6 +885,7 @@ int retrieve_my_userID(int socket)
  */
 int automatic_neg_response(int sock_id, int refused_user)
 {
+    //[SECURE CODING]: controllare sock_id >= 0, 0 <= ntohl(refused_user) < REGISTERED_USERS ?
     uint32_t risp_buff_size = sizeof(uint8_t)+sizeof(int);
     unsigned char* risp_buff = (unsigned char*)malloc(risp_buff_size);
     if(!risp_buff)
@@ -905,6 +915,7 @@ int automatic_neg_response(int sock_id, int refused_user)
  */
 int authentication(int sock_id, uint8_t ver)
 {
+    //[SECURE CODING]: controllare sock_id >= 0
     // If the authentication is done with another client with the word "server" indicates the other client
     if(ver!=AUTH_CLNT_CLNT && ver!=AUTH_CLNT_SRV)
         return -1;
@@ -1453,6 +1464,7 @@ int authentication(int sock_id, uint8_t ver)
  */
 int authentication_receiver(int sock_id)
 {
+    //[SECURE CODING]: controllare sock_id >= 0
     int ret;
     int peer_id_net = htonl(peer_id);
     uint8_t op_rec;
@@ -1598,9 +1610,9 @@ int authentication_receiver(int sock_id)
     fclose(privKey_file);
 
     //Send M2 part by part
-    uint M2_size = sizeof(uint8_t) + sizeof(int) + NONCE_SIZE + sizeof(int) + eph_pubkey_s_len + sizeof(int) + M2_signed_length;
+    uint M2_size = sizeof(uint8_t) + sizeof(int) + NONCE_SIZE + sizeof(int) + eph_pubkey_s_len + sizeof(int) + M2_signed_length; //[SECURE CODING]: unsigned_wrap (forse molto paranoica)?
     uint offset = 0;
-    uchar* M2 = (uchar*)malloc(M2_size);
+    uchar* M2 = (uchar*)malloc(M2_size); //[SECURE CODING]: control malloc
     uint eph_pubkey_s_len_net = htonl(eph_pubkey_s_len);
     uint M2_signed_length_net = htonl(M2_signed_length);
    
@@ -1727,7 +1739,7 @@ int authentication_receiver(int sock_id)
 
     safe_free(msg3, msg3_len);
 
-    uint m3_document_size = eph_pubkey_c_len + NONCE_SIZE;
+    uint m3_document_size = eph_pubkey_c_len + NONCE_SIZE; //[SECURE CODING]: unsigned wrap ?
     uchar* m3_document = (uchar*)malloc(m3_document_size);
     if(!m3_document){
         errorHandler(MALLOC_ERR);
@@ -1796,6 +1808,7 @@ int authentication_receiver(int sock_id)
  */
 int chatRequestHandler(unsigned char* plaintext)
 {
+    //[SECURE CODING]: plaintex != nullptr
     int ret;
     uint8_t opcode = NOT_VALID_CMD;
     uint8_t response;
@@ -1815,7 +1828,7 @@ int chatRequestHandler(unsigned char* plaintext)
     // Read username length
     memcpy(&size_username, plaintext+bytes_read, sizeof(int));
     bytes_read += sizeof(int);
-    size_username = ntohl(size_username);
+    size_username = ntohl(size_username); //[SECURE CODING]: check that 0 < size_username < MAX_USERNAME_SIZE
   
     // Read username peer
     counterpart = (unsigned char*)malloc(size_username+1); // +1 for string terminator
@@ -2042,6 +2055,7 @@ int arriveHandler(int sock_id){
  /* ****************************************
 *      RECEIVE FROM THE SERVER SECTION
  * *****************************************/
+    //[SECURE CODING]: controllare sock_id >= 0
     uint8_t op;
     int counterpart_id;
     int ret;
