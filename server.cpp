@@ -130,7 +130,7 @@ int sem_epilogue(sem_t* sem_id){
  */
 int get_user_socket_by_user_id(int user_id){
     if(user_id < 0 || user_id >= REGISTERED_USERS){
-        log("Invalid user id");
+        log("ERROR: Invalid user id");
         return -2;
     }
     sem_t* sem_id= sem_open(sem_user_store_name, O_CREAT, 0600, 1);
@@ -173,8 +173,8 @@ int set_user_socket(string username, int socket){
         if(user_status[i].username.compare(username) == 0){
             user_status[i].socket_id = socket;
             if(socket==-1)
-                log("\n\n***** logout of client " +username+" *****\n\n");
-            log("Set socket of " + username + " correctly");
+                vlog("\n\n***** logout of client " +username+" *****\n\n");
+            vlog("Set socket of " + username + " correctly");
             found = 1;
             break;
         }
@@ -258,7 +258,7 @@ int initialize_user_info(user_info* user_status){
 
 
 int get_user_id_by_username(string username){
-    log("Entering get id by username");
+    vlog("Entering get id by username");
     sem_t* sem_id= sem_open(sem_user_store_name, O_CREAT, 0600, 1);
     if(-1 == sem_prologue(sem_id)){
         log("ERROR on sem_prologue");
@@ -269,7 +269,7 @@ int get_user_id_by_username(string username){
     user_info* user_status = (user_info*)shmem;
     for(int i=0; i<REGISTERED_USERS; i++){
         if(user_status[i].username.compare(username) == 0){
-            log("Found username " + username + " in the datastore with user_id " + to_string(i));
+            vlog("Found username " + username + " in the datastore with user_id " + to_string(i));
             ret = i;
             break;
         }
@@ -301,7 +301,7 @@ string get_username_by_user_id(size_t id){
 
     user_info* user_status = (user_info*)shmem;
     string username = user_status[id].username;
-    log("Obtained username of " + username);
+    vlog("Obtained username of " + username);
     if(-1 == sem_epilogue(sem_id)){
         log("ERROR on sem_epilogue");
         return "";
@@ -325,7 +325,7 @@ void prior_cleanup(){
     buf.msg_qbytes = 120000;
     int ret = msgctl(msgid, IPC_SET, &buf);
     msgctl(msgid, IPC_STAT, &buf);    
-    log("Message queue size: " + to_string(buf.msg_qbytes));
+    vlog("Message queue size: " + to_string(buf.msg_qbytes));
 }
 
 // ---------------------------------------------------------------------
@@ -340,13 +340,13 @@ int relay_write(uint to_user_id, msg_to_relay msg){
     if(to_user_id >= REGISTERED_USERS)
         return -1;
     
-    log("Entering relay_write for " + to_string(to_user_id));
+    vlog("Entering relay_write for " + to_string(to_user_id));
     msg.type = to_user_id + 1;
     
     key_t key = ftok(message_queue_name, 65); 
-    vvlog("Key of ftok returned is " + to_string(key));
+    vlog("Key of ftok returned is " + to_string(key));
     int msgid = msgget(key, 0666 | IPC_CREAT);
-    vvlog("msgid is " + to_string(msgid));
+    vlog("msgid is " + to_string(msgid));
 
     return msgsnd(msgid, &msg, sizeof(msg_to_relay), 0);
 }
@@ -364,7 +364,7 @@ int relay_read(int user_id, msg_to_relay& msg, bool blocking){
         time_remained = alarm(0);
 
     int ret = -1;
-    log("relay_read of user_id " + to_string(user_id) + " [" + (blocking? "blocking": "non blocking") + "]");
+    vlog("relay_read of user_id " + to_string(user_id) + " [" + (blocking? "blocking": "non blocking") + "]");
 
     //Read from the message queue
     key_t key = ftok(message_queue_name, 65); 
@@ -375,7 +375,7 @@ int relay_read(int user_id, msg_to_relay& msg, bool blocking){
     
     ret = msgrcv(msgid, &msg, sizeof(msg), user_id+1, (blocking? 0: IPC_NOWAIT));
     if(ret == -1)
-        log("read nothing");
+        vlog("read nothing");
 
 
     if(blocking){
@@ -399,7 +399,7 @@ int relay_read(int user_id, msg_to_relay& msg, bool blocking){
  */
 void signal_handler(int sig)
 {
-    log("signal handler");
+    vlog("signal handler");
     int ret;
     uint8_t opcode;
     int bytes_copied = relay_read(client_user_id, relay_msg, false);
@@ -413,7 +413,7 @@ void signal_handler(int sig)
             uint username_length, username_length_net;
             memcpy(&username_length_net, (void*)(relay_msg.buffer + 5), sizeof(int));
             username_length = ntohl(username_length_net);
-            log("USERNAME LENGTH: " + to_string(username_length));
+            vlog("USERNAME LENGTH: " + to_string(username_length));
             
             if(username_length > UINT_MAX - 9 - PUBKEY_DEFAULT_SER){
                 log("ERROR: unsigned wrap");
@@ -428,8 +428,8 @@ void signal_handler(int sig)
                 close(comm_socket_id);
                 exit(1);
             }       
-            log("Sent to client : ");    
-            BIO_dump_fp(stdout, (const char*)relay_msg.buffer, msg_len); //TODO: rimuovi
+            // log("Sent to client : ");    
+            // BIO_dump_fp(stdout, (const char*)relay_msg.buffer, msg_len); 
 
         } else if(opcode == AUTH || opcode == CHAT_RESPONSE){
             memcpy(&msg_len, relay_msg.buffer + 1, sizeof(int)); //Added len field
@@ -457,8 +457,8 @@ void signal_handler(int sig)
                 exit(1);
             }       
 
-            log("Sent to client : ");    
-            BIO_dump_fp(stdout, (const char*)msg_to_send, msg_len); //TODO: rimuovi
+            // log("Sent to client : ");    
+            // BIO_dump_fp(stdout, (const char*)msg_to_send, msg_len);
             free(msg_to_send);
         } else if(opcode == STOP_CHAT || opcode == CHAT_NEG){
             msg_len = 5;
@@ -471,8 +471,8 @@ void signal_handler(int sig)
                 exit(1);
             }       
 
-            log("Sent to client : ");    
-            BIO_dump_fp(stdout, (const char*)relay_msg.buffer, msg_len); //TODO: rimuovi
+            // log("Sent to client : ");    
+            // BIO_dump_fp(stdout, (const char*)relay_msg.buffer, msg_len); //TODO: rimuovi
         } else {
             log("OPCODE not recognized (" + to_string(opcode) + ")");
         }
@@ -512,7 +512,7 @@ int send_secure(int comm_socket_id, uchar* pt, uint pt_len){
 
     // adding sequence number
     uint32_t counter_n=htonl(send_counter);
-    cout <<" adding sequrnce number " << send_counter << endl;
+    // cout <<" adding sequrnce number " << send_counter << endl;
     if(pt_len > UINT_MAX - sizeof(uint32_t)){
         log("ERROR: unsigned wrap");
         return 0;
@@ -523,8 +523,8 @@ int send_secure(int comm_socket_id, uchar* pt, uint pt_len){
     memcpy(pt_seq+ sizeof(uint32_t), pt, pt_len);
     pt=pt_seq;
     pt_len+=sizeof(uint32_t);
-    log("Plaintext to send (with seq):");
-    BIO_dump_fp(stdout, (const char*)pt, pt_len);
+    // log("Plaintext to send (with seq):");
+    // BIO_dump_fp(stdout, (const char*)pt, pt_len);
 
     uint aad_ct_len_net = htonl(pt_len); //Since we use GCM ciphertext == plaintext
     uint ct_len = auth_enc_encrypt(pt, pt_len, (uchar*)&aad_ct_len_net, sizeof(uint), session_key, &tag, &iv, &ct);
@@ -540,11 +540,11 @@ int send_secure(int comm_socket_id, uchar* pt, uint pt_len){
     uint msg_to_send_len = ct_len + header_len, bytes_copied = 0;
     uchar* msg_to_send = (uchar*)malloc(msg_to_send_len);
     if(!msg_to_send){
-        errorHandler(MALLOC_ERR);
+        // errorHandler(MALLOC_ERR);
         return 0;
     }
 
-    cout << aad_ct_len_net << " -> " << ntohl(aad_ct_len_net) << endl;
+    // cout << aad_ct_len_net << " -> " << ntohl(aad_ct_len_net) << endl;
     memcpy(msg_to_send + bytes_copied, &aad_ct_len_net, sizeof(uint));
     bytes_copied += sizeof(uint);
     memcpy(msg_to_send + bytes_copied, iv, IV_DEFAULT);
@@ -565,8 +565,8 @@ int send_secure(int comm_socket_id, uchar* pt, uint pt_len){
         log("auth_enc_decrypt failed");
         return 0;
     }
-    cout << " plaintext " << endl;
-    BIO_dump_fp(stdout, (const char*)pt_test, pt_len_test);
+    // log(" plaintext ");
+    // BIO_dump_fp(stdout, (const char*)pt_test, pt_len_test);
     safe_free(pt, pt_len);
     //------------------------------------------------------
     ret = send(comm_socket_id, msg_to_send, msg_to_send_len, 0);
@@ -605,7 +605,7 @@ int recv_secure(int comm_socket_id, unsigned char** plaintext)
     //     return -1;
     // }
 
-    log(" SECURE RECEIVE ");
+    vlog(" SECURE RECEIVE ");
 
     uint32_t header_len = sizeof(uint32_t)+IV_DEFAULT+TAG_DEFAULT; 
     uint32_t ct_len;
@@ -645,7 +645,7 @@ int recv_secure(int comm_socket_id, unsigned char** plaintext)
         safe_free(iv, IV_DEFAULT);
         return -1;
     }
-    BIO_dump_fp(stdout, (const char*)header, header_len);
+    // BIO_dump_fp(stdout, (const char*)header, header_len);
 
     // Open header
     memcpy((void*)&ct_len, header, sizeof(uint32_t));
@@ -701,7 +701,7 @@ int recv_secure(int comm_socket_id, unsigned char** plaintext)
 
     // Decryption
     // cout<<"Session key:"<<endl;
-    // BIO_dump_fp(stdout, (const char*) session_key, 32); //TODO: remove
+    // BIO_dump_fp(stdout, (const char*) session_key, 32);
     pt_len = auth_enc_decrypt(ciphertext, ct_len, aad, sizeof(uint32_t), session_key, tag, iv, plaintext);
     if(pt_len == 0 || pt_len!=ct_len){
         cerr << " Error during decryption " << endl;
@@ -713,10 +713,10 @@ int recv_secure(int comm_socket_id, unsigned char** plaintext)
         safe_free(aad, sizeof(uint32_t));
         return -1;
     }
-    cout << " ciphertext is: " << endl;
-    BIO_dump_fp(stdout, (const char*)ciphertext, ct_len);
-    cout << " plaintext is " << endl;
-    BIO_dump_fp(stdout, (const char*)*plaintext, pt_len);
+    // cout << " ciphertext is: " << endl;
+    // BIO_dump_fp(stdout, (const char*)ciphertext, ct_len);
+    // cout << " plaintext is " << endl;
+    // BIO_dump_fp(stdout, (const char*)*plaintext, pt_len);
     safe_free(ciphertext, ct_len);
     safe_free(tag, TAG_DEFAULT);
     safe_free(header, header_len);
@@ -725,8 +725,8 @@ int recv_secure(int comm_socket_id, unsigned char** plaintext)
 
     // check seq number
     uint32_t sequece_number = ntohl(*(uint32_t*) (*plaintext));
-    cout << " received sequence number " << sequece_number  << " aka " << *(uint32_t*) (*plaintext) << endl;
-    cout << " Expected sequence number " << receive_counter << endl;
+    // cout << " received sequence number " << sequece_number  << " aka " << *(uint32_t*) (*plaintext) << endl;
+    // cout << " Expected sequence number " << receive_counter << endl;
     if(sequece_number<receive_counter){
         cerr << " Error: wrong seq number " << endl;
         safe_free(*plaintext, pt_len);
@@ -775,7 +775,7 @@ int handle_client_authentication(string pwd_for_keys){
         return -1;
     }
     client_username_len = ntohl(client_username_len);
-    log("M1 auth (1) Received username size: " + to_string(client_username_len));
+    vlog("M1 auth (1) Received username size: " + to_string(client_username_len));
 
     char* username = (char*)malloc(client_username_len);
     if(!username){
@@ -792,7 +792,7 @@ int handle_client_authentication(string pwd_for_keys){
         return -1;
     }
     string client_username(username);
-    log("M1 auth (2) Received username: " + client_username);
+    vlog("M1 auth (2) Received username: " + client_username);
     
     if(get_user_socket_by_user_id(get_user_id_by_username(username)) != -1){
         log("ERROR user already online");
@@ -931,7 +931,7 @@ int handle_client_authentication(string pwd_for_keys){
     uint eph_pubkey_s_len_net = htonl(eph_pubkey_s_len);
     uint M2_signed_length_net = htonl(M2_signed_length);
     uint certificate_len_net = htonl(certificate_len);
-    log("Copying");
+    vlog("Copying");
     memcpy((void*)(M2 + offset), R2, NONCE_SIZE);
     offset += NONCE_SIZE;
     memcpy((void*)(M2 + offset), &eph_pubkey_s_len_net, sizeof(uint));
@@ -947,7 +947,7 @@ int handle_client_authentication(string pwd_for_keys){
     memcpy((void*)(M2 + offset), certificate_ser, certificate_len);
     offset += certificate_len;
     
-    log("M2 size: " + to_string(M2_size));
+    vlog("M2 size: " + to_string(M2_size));
     
     ret = send(comm_socket_id, M2, M2_size, 0);
     if(ret < M2_size){
@@ -983,7 +983,7 @@ int handle_client_authentication(string pwd_for_keys){
     
     eph_pubkey_c_len = ntohl(eph_pubkey_c_len);
     //eph_pubkey_c_len =178;
-    log("M3 auth (1) pubkey_c_len: "+ to_string(eph_pubkey_c_len));
+    vlog("M3 auth (1) pubkey_c_len: "+ to_string(eph_pubkey_c_len));
 
     uchar* eph_pubkey_c = (uchar*)malloc(eph_pubkey_c_len);
     if(!eph_pubkey_c ){
@@ -1013,7 +1013,7 @@ int handle_client_authentication(string pwd_for_keys){
         return -1;
     }
     m3_signature_len = ntohl(m3_signature_len);
-    log("M3 auth (3) m3_signature_len: "+ to_string(m3_signature_len));
+    vlog("M3 auth (3) m3_signature_len: "+ to_string(m3_signature_len));
 
     uchar* M3_signed = (uchar*)malloc(m3_signature_len); //TODO: control tainted
     if(!M3_signed){
@@ -1033,8 +1033,8 @@ int handle_client_authentication(string pwd_for_keys){
         return -1;
     }
 
-    log("auth (4) M3 signed:");
-    BIO_dump_fp(stdout, (const char*)M3_signed, m3_signature_len);
+    // log("auth (4) M3 signed:");
+    // BIO_dump_fp(stdout, (const char*)M3_signed, m3_signature_len);
 
     string pubkey_of_client_path = "certification/" + client_username + "_pubkey.pem";
     FILE* pubkey_of_client = fopen(pubkey_of_client_path.c_str(), "rb");
@@ -1065,7 +1065,7 @@ int handle_client_authentication(string pwd_for_keys){
 
     memcpy(m3_document, eph_pubkey_c,eph_pubkey_c_len );
     memcpy(m3_document+eph_pubkey_c_len, R2, NONCE_SIZE);
-    log("auth (5) M3, verifying sign");
+    vlog("auth (5) M3, verifying sign");
     ret = verify_sign_pubkey(M3_signed, m3_signature_len,m3_document,m3_document_size, pubkey_of_client);
     if(ret == 0){
         log("Failed sign verification on M3");
@@ -1079,7 +1079,7 @@ int handle_client_authentication(string pwd_for_keys){
     fclose(pubkey_of_client);
     uchar* shared_seceret;
     uint shared_seceret_len;
-    log("auth (6) Creating session key");
+    vlog("auth (6) Creating session key");
     shared_seceret_len = derive_secret(eph_privkey_s, eph_pubkey_c, eph_pubkey_c_len, &shared_seceret);
     if(shared_seceret_len == 0){
         log("Failed derive secret");
@@ -1105,7 +1105,7 @@ int handle_client_authentication(string pwd_for_keys){
     //Send user id of the client 
     int client_user_id = get_user_id_by_username(client_username);
     int client_user_id_net = htonl(client_user_id);
-    log("Found username in the datastore with user_id " + to_string(client_user_id_net));
+    vlog("Found username in the datastore with user_id " + to_string(client_user_id_net));
 
     //Set that user is online
     ret = set_user_socket(client_username, comm_socket_id);
@@ -1127,6 +1127,7 @@ int handle_client_authentication(string pwd_for_keys){
         return -1;
     }
 
+    
     //Check if present in the user_datastore
     free(username);
     return get_user_id_by_username(client_username);
@@ -1149,7 +1150,7 @@ int handle_get_online_users(int comm_socket_id, uchar* plaintext){
         return -1;
     }
 
-    log("\n\n*** USERS_ONLINE opcode arrived ***\n");
+    log("\n*** USERS_ONLINE ***\n");
     int ret;
     uint offset_reply = 0; 
     unsigned char online_cmd = ONLINE_CMD;
@@ -1197,7 +1198,7 @@ int handle_get_online_users(int comm_socket_id, uchar* plaintext){
             offset_reply += curr_username_length;
         }
     }
-    log("Offset reply: " + to_string(offset_reply));
+    vlog("Offset reply: " + to_string(offset_reply));
     ret = send_secure(comm_socket_id, (uchar*)replyToSend, offset_reply);
     if(ret == 0){
         safe_free(replyToSend, total_space_to_allocate);
@@ -1226,7 +1227,7 @@ int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& re
         return -1;
     }
 
-    log("\n\n*** CHAT opcode arrived ***\n");
+    log("\n*** CHAT_REQUEST ***\n");
     uint offset_plaintext = 5; //From where data is good to read 
     uint offset_relay = 0;
     int ret;
@@ -1251,8 +1252,8 @@ int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& re
     uint32_t client_username_length_net = htonl(client_username_length);
     uint32_t client_user_id_net = htonl(client_user_id);
     const char* username = client_username.c_str();
-    log(username);
-    log("Request for chatting with user id " +  to_string(peer_user_id) + " arrived ");
+    vlog(username);
+    vlog("Request for chatting with user id " +  to_string(peer_user_id) + " arrived ");
 
     memcpy((void*)(relay_msg.buffer + offset_relay), (void*)&chat_cmd, 1);
     offset_relay += sizeof(uchar);
@@ -1264,7 +1265,7 @@ int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& re
     offset_relay += client_username_length;
 
     string pubkey_of_client_path = "certification/" + client_username + "_pubkey.pem";
-    log("Opening " + pubkey_of_client_path);
+    vlog("Opening " + pubkey_of_client_path);
     FILE* pubkey_of_client_file = fopen(pubkey_of_client_path.c_str(), "rb");
     if(!pubkey_of_client_file){
         log("Unable to open pubkey of client");
@@ -1272,8 +1273,8 @@ int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& re
     }
     uchar* pubkey_client_ser;
     int pubkey_client_ser_len = serialize_pubkey_from_file(pubkey_of_client_file, &pubkey_client_ser);
-    log("Pubkey ser len : " + to_string(pubkey_client_ser_len) + "(default: " + to_string(PUBKEY_DEFAULT_SER) + "), pubkey_ser:");
-    BIO_dump_fp(stdout, (const char*)pubkey_client_ser, pubkey_client_ser_len);
+    // log("Pubkey ser len : " + to_string(pubkey_client_ser_len) + "(default: " + to_string(PUBKEY_DEFAULT_SER) + "), pubkey_ser:");
+    // BIO_dump_fp(stdout, (const char*)pubkey_client_ser, pubkey_client_ser_len);
 
     memcpy((void*)(relay_msg.buffer + offset_relay), (void*)pubkey_client_ser, pubkey_client_ser_len);
     offset_relay += pubkey_client_ser_len;
@@ -1285,8 +1286,8 @@ int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& re
         final_response_len = 5;
     else
         final_response_len = 5 + PUBKEY_DEFAULT_SER;
-    log("Relaying: ");
-    BIO_dump_fp(stdout, relay_msg.buffer, offset_relay);    
+    vlog("Relaying ");
+    // BIO_dump_fp(stdout, relay_msg.buffer, offset_relay);    
     vlog("Handle chat request (2)");
 
     //Handle case user is offline
@@ -1333,11 +1334,11 @@ int handle_chat_pos_neg(uchar* plaintext, uint8_t opcode){
     }
 
     if(opcode == CHAT_POS)
-        log("\n\n*** Received CHAT_POS command ***\n");
+        log("\n\n*** CHAT_POS ***\n");
     else if(opcode == CHAT_NEG)
-        log("\n\n*** Received CHAT_NEG command ***\n");
+        log("\n\n*** CHAT_NEG ***\n");
     else if(opcode == STOP_CHAT)
-        log("\n\n*** Received STOP_CHAT command ***\n");
+        log("\n\n*** STOP_CHAT ***\n");
     else{
         log("invalid opcode on handle_chat_pos_neg");
         return -1;
@@ -1363,7 +1364,7 @@ int handle_chat_pos_neg(uchar* plaintext, uint8_t opcode){
         log("INVALID peer_user_id on handle_chat_pos_neg");
         return -1;
     }
-    log("Command to send for user_id " +  to_string(peer_user_id) + " arrived ");
+    vlog("Command to send for user_id " +  to_string(peer_user_id) + " arrived ");
     
 
     memcpy((void*)(relay_msg.buffer + offset_relay), (void*)&opcode, sizeof(uchar));
@@ -1373,7 +1374,7 @@ int handle_chat_pos_neg(uchar* plaintext, uint8_t opcode){
     if(opcode == CHAT_POS){
         string client_username = get_username_by_user_id(client_user_id);
         string pubkey_of_client_path = "certification/" + client_username + "_pubkey.pem";
-        log("Opening " + pubkey_of_client_path);
+        vlog("Opening " + pubkey_of_client_path);
         FILE* pubkey_of_client_file = fopen(pubkey_of_client_path.c_str(), "rb");
         if(!pubkey_of_client_file){
             log("Unable to open pubkey of client");
@@ -1383,8 +1384,8 @@ int handle_chat_pos_neg(uchar* plaintext, uint8_t opcode){
         //Adding pubkey
         uchar* pubkey_client_ser;
         int pubkey_client_ser_len = serialize_pubkey_from_file(pubkey_of_client_file, &pubkey_client_ser);
-        log("Pubkey ser len : " + to_string(pubkey_client_ser_len) + "(default: " + to_string(PUBKEY_DEFAULT_SER) + "), pubkey_client_ser:");
-        BIO_dump_fp(stdout, (const char*)pubkey_client_ser, pubkey_client_ser_len);
+        vlog("Pubkey ser len : " + to_string(pubkey_client_ser_len) + "(default: " + to_string(PUBKEY_DEFAULT_SER) + "), pubkey_client_ser:");
+        // BIO_dump_fp(stdout, (const char*)pubkey_client_ser, pubkey_client_ser_len);
 
         // memcpy((void*)(relay_msg.buffer + offset_relay), &pubkey_client_ser_len, sizeof(int));
         // offset_relay += sizeof(int);
@@ -1392,8 +1393,8 @@ int handle_chat_pos_neg(uchar* plaintext, uint8_t opcode){
         offset_relay += pubkey_client_ser_len;
     }
     
-    log("Relaying: ");
-    BIO_dump_fp(stdout, relay_msg.buffer, offset_relay);
+    vlog("Relaying: ");
+    // BIO_dump_fp(stdout, relay_msg.buffer, offset_relay);
     // if(get_user_socket_by_user_id(peer_user_id) == -1){
     //     log("User: " + to_string(peer_user_id) + "is offline. Sending CHAT_NEG");
     //     uchar chat_cmd = CHAT_NEG;
@@ -1416,9 +1417,9 @@ int handle_chat_pos_neg(uchar* plaintext, uint8_t opcode){
  */
 int handle_auth_and_msg(uchar* plaintext, uint8_t opcode, int plaintext_len){
     if(opcode == AUTH)
-        log("\n\n Arrived AUTH (" + to_string(opcode) + ") command\n\n");
+        log("\n *** AUTH (" + to_string(opcode) + ") ***\n");
     else if(opcode == CHAT_RESPONSE) 
-        log("\n\n Arrived CHAT_RESPONSE command\n\n");
+        log("\n *** CHAT_RESPONSE ***\n");
     else{
         log("invalid opcode on handle_chat_pos_neg");
         return -1;
@@ -1436,7 +1437,7 @@ int handle_auth_and_msg(uchar* plaintext, uint8_t opcode, int plaintext_len){
     offset_plaintext += sizeof(int);
     int peer_user_id = ntohl(peer_user_id_net);
     
-    log("Command to send for user_id " +  to_string(peer_user_id) + " arrived ");
+    vlog("Command to send for user_id " +  to_string(peer_user_id) + " arrived ");
     memcpy((void*)(relay_msg.buffer + offset_relay), (void*)&opcode, sizeof(uint8_t));
     offset_relay += sizeof(uint8_t);
     //Add length of msg in between
@@ -1444,9 +1445,9 @@ int handle_auth_and_msg(uchar* plaintext, uint8_t opcode, int plaintext_len){
     offset_relay += sizeof(int);
     memcpy((void*)(relay_msg.buffer + offset_relay), (void*)(plaintext + 5), plaintext_len - 5);
     offset_relay += (plaintext_len - 5);
-    log("plain_len_without_seq: " + to_string(plain_len_without_seq));
-    log("Relaying: ");
-    BIO_dump_fp(stdout, relay_msg.buffer, offset_relay);
+    vlog("plain_len_without_seq: " + to_string(plain_len_without_seq));
+    vlog("Relaying: ");
+    // BIO_dump_fp(stdout, relay_msg.buffer, offset_relay);
 
     //Control if user is offline
     if(get_user_socket_by_user_id(peer_user_id) == -1){
@@ -1558,11 +1559,20 @@ int main(){
                 log("Errore di autenticazione");
                 return -1;
             }
-
+            string client_username = get_username_by_user_id(client_user_id);
+            if(client_username.compare("") == 0){
+                log("ERROR on get_username_by_user_id");
+                return -1;
+            }
+            
+            log("--- AUTHENTICATION COMPLETED WITH user: " + client_username);
             // Every REQUEST_CONTROL_TIME seconds a signal is issued to control if the server has sent
             // a chat request originated from another clientS 
             if(SIG_ERR == signal(SIGALRM, signal_handler)){
                 log("ERROR on signal");
+                safe_free(session_key, session_key_len);
+                set_user_socket(get_username_by_user_id(client_user_id), -1);
+                close(comm_socket_id);
                 return 0;
             }
 

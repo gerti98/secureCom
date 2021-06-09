@@ -168,7 +168,7 @@ the handshake, and future messages are numbered against reply attacks.
 In order to end a chat session, one of the two users may send a \texttt{STOP CHAT} command to the server; this
 command is forwarded to the other client, who will close the chat session by his side; in order to disconnect from the server, the user have to send the 
 \texttt{EXIT} command. In case one client stops without sending the \texttt{EXIT} command, the server will notice 
-it and will procede to close the session and (if necessary) relative chat session.
+it and will proceed to close the session and (if necessary) relative chat session.
 
 
 \chapter{Implementation}
@@ -202,24 +202,24 @@ Ciphers are the same for Client-Server and Client-Client communication, specific
 Chapter 4.
 \subsection{Public Key Authentication}
 \paragraph*{Long Term Keys}
-The Certification Authority (CA) has a \texttt{Publick Key}, included in a self-signed
+The Certification Authority (CA) has a \texttt{Public Key}, included in a self-signed
 certificate; the corresponding private key is embedded in the program for certificate generation, 
 SimpleAuthority \footnote{https://simpleauthority.com}.
 CA's certificates and Revocation List (CRL) are exported and distributed with client executable.
-The server certificate, which is signed by CA, contains the \texttt{Publick Key} of the server; it
+The server certificate, which is signed by CA, contains the \texttt{Public Key} of the server; it
 is stored server side, and provided to the client during the handshake.
 Clients Public Keys are also stored in the server, while only the client hold its Private Key.
 All keys are \texttt{RSA Key Pairs with 2048-bits Public Keys} and are stored in \texttt{.pem} format, as certificates and CRLs are.
 \paragraph*{Short Term Keys}
-Handshakes protocols are performed with the Ephimeral Diffie-Hellman Key Exchange. 
+Handshakes protocols are performed with the Ephemeral Diffie-Hellman Key Exchange. 
 We choose to use the Elliptic Curve implementation because is very efficient (in term of performance vs security strength);
 we use \verb|NID_X9_62_prime256v1| standard parameters that ensure 128-bits security strength with a 256-bits curve. We use the \texttt{SHA-256} digest of the \texttt{shared secret} as
 the session key.
-To ensure freshness in the challenge-response scheme we use \texttt{16 bytes nonces}.
+To ensure freshness in the challenge-response scheme we use \texttt{2 bytes nonces}.
 \subsection{Authenticated Encryption}
 From the handshake we obtain a 256-bits symmetric key which is used in \texttt{AES-256 GCM} authenticated encryption protocol.
 We use a \texttt{16 bytes} tag for authentication of ciphertext and clear fields in the header. GCM scheme ensure a ciphertext
-size equal to the plaintext size; this makes programming easier, mantaining an optimal resistance against all known attacks.
+size equal to the plaintext size; this makes programming easier, maintaining an optimal resistance against all known attacks.
 Messages exchanged in sessions are numbered, starting from 1, to a maximum of $2^{32}-1$ (\verb|0xFFFFFFFF|), which is the
 maximum integer representable on 32 bits; this will make possible to identify a message reply, done
 by an attacker. The session is automatically closed when a message with number \verb|0xFFFFFFFF| is received.
@@ -264,7 +264,7 @@ because the attacker have to discover also the session key between a client and 
 \begin{figure}[H]
 	\centering
 	\includegraphics[scale=0.28]{img/SessionFirstMessageFormat.png}
-	\caption{First message of every Session: server communicate cliet userID}
+	\caption{First message of every Session: server communicate client userID}
 	\label {img: FormatClientServerFirst}
 \end{figure}
 \subsection*{Client Online List Request and Answer }
@@ -301,7 +301,7 @@ because the attacker have to discover also the session key between a client and 
 
 \chapter{User Manual}
 \subsection*{Server}
-The server is a daemon, so it has to be starded and it will be always running. At server startup a password
+The server is a daemon, so it has to be started and it will be always running. At server startup a password
 a \texttt{sudo} password is required in order to properly set kernel variables for the message queue; than another password
 is required, this time to decrypt and use the private key, which is stored in the \verb|SecureCom_prvkey.pem| file.
 
@@ -321,11 +321,11 @@ Enter PEM pass phrase:
 HELLO alice
 \end{lstlisting}
 At the end of this phase client and server have correctly authenticated each others and can now communicate
-using a sesion key.
+using a session key.
 \newpage
 \section{Chat}
 \subsection*{Users list}
-With this command a client can retrive the list of online users:
+With this command a client can retrieve the list of online users:
 \begin{lstlisting}
 !users_online
 
@@ -337,7 +337,7 @@ With this command a client can retrive the list of online users:
 \end{lstlisting}
 
 \subsection*{Chat request}
-With the chat command, a client can request to chat with onother one who is online:
+With the chat command, a client can request to chat with another one who is online:
 \begin{lstlisting}
 !chat
 	
@@ -349,7 +349,7 @@ Enter PEM pass phrase:
 AUTHENTICATION WITH alice SUCCESFULLY EXECUTED 
 \end{lstlisting}
 \subsection*{Chat response}
-when a chat requets is received, the user is asket to accept ot deny it; in case of positive answer,
+when a chat requests is received, the user is asked to accept ot deny it; in case of positive answer,
 handshake is performed (password is required at both sides).
 \begin{lstlisting}
 **********************************************************

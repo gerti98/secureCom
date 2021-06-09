@@ -67,7 +67,7 @@
 #define REGISTERED_USERS 5
 #define BUFFER_MAX  10000
 #define REQUEST_CONTROL_TIME 30 // seconds
-#define RELAY_CONTROL_TIME 5 //seconds
+#define RELAY_CONTROL_TIME 2 //seconds
 #define RELAY_MSG_SIZE 11000
 #define NONCE_SIZE 2
 #define AUTH_CLNT_SRV 1
