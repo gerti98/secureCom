@@ -10,6 +10,7 @@
 #include <iostream>
 #include <vector>
 #include <climits>
+#include <limits>
 #include <unistd.h>
 #include <openssl/evp.h>
 #include <openssl/pem.h>
@@ -182,7 +183,12 @@ int chat(struct commandMSG* toSend, user* userlist)
     cout << "Write the userID of the user that you want to contact" << endl;
     printf(" > ");
     cin >> toSend->userId;
-    cin.ignore(100,'\n');
+    if(cin.fail()){
+        cin.clear();
+        cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+        return -1;
+    }
+    cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
     if(toSend->userId==loggedUser_id){
         cout << " You cannot chat with yourself " << endl;
         return -1;
@@ -1020,7 +1026,12 @@ int authentication(int sock_id, uint8_t ver)
             cout << "Who are you? " << endl;
             cout << "> ";
             cin >> loggedUser;
-            cin.ignore(100,'\n');
+            if(cin.fail()){
+                cin.clear();
+                cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                return -1;
+            }
+            cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
             if(loggedUser.size()+1>MAX_USERNAME_SIZE)
                 tooBig = true;
         }while(tooBig);
@@ -2025,7 +2036,10 @@ int chatRequestHandler(unsigned char* plaintext, uint32_t pt_len)
     free(counterpart);
     while(user_resp!='y' && user_resp!='n') {
         cin >> user_resp;
-        cin.ignore(100,'\n');
+        if(cin.fail()){
+            cin.clear();
+        }
+        cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
         if(user_resp=='y')
             response = CHAT_POS;
         else if (user_resp=='n')
@@ -2141,6 +2155,7 @@ int commandHandler(string userInput){
             
         case NOT_VALID_CMD:
             no_comm_with_srv = true;
+            //BIO_dump_fp(stdout, (const char*)userInput.c_str(), userInput.length());
             cout << "Command Not Valid" << endl;
             break;
             
