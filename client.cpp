@@ -815,10 +815,13 @@ int send_command_to_server(int sock_id, commandMSG* cmdToSend)
         return -1;
 
     memcpy(pt, &(cmdToSend->opcode), sizeof(uint8_t));
-
+    int stop=0;
     if(cmdToSend->opcode==CHAT_CMD || cmdToSend->opcode==STOP_CHAT) {
-        if(cmdToSend->opcode==STOP_CHAT)
+        if(cmdToSend->opcode==STOP_CHAT){
             cmdToSend->userId = peer_id;
+            stop=1;
+        }
+            
         net_id = htonl(cmdToSend->userId);
         memcpy(pt+sizeof(uint8_t), &net_id, sizeof(uint32_t));
     }
@@ -829,6 +832,10 @@ int send_command_to_server(int sock_id, commandMSG* cmdToSend)
         return -1;
     }
     safe_free(pt, pt_len);
+    if(stop){
+        send_counter_client_client=0;
+        receive_counter_client_client=0;
+    }
     return 0;
 }
 
@@ -2348,6 +2355,8 @@ int arriveHandler(int sock_id){
         isChatting = false;
         free(peer_pub_key);
         peer_pub_key = NULL;
+        send_counter_client_client=0;
+        receive_counter_client_client=0;
         cout << " \t\t +++ Chat terminated by " << peer_username << " +++\n" << endl;
         break;
     default:{
