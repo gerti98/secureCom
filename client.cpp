@@ -947,8 +947,11 @@ int automatic_neg_response(int sock_id, int refused_user)
 {
     if(sock_id<0)
         return -1;
-    if(refused_user<0 || refused_user>REGISTERED_USERS)
+
+    if(ntohl(refused_user)<0 || ntohl(refused_user)>REGISTERED_USERS)
         return -1;
+    
+    
     uint32_t risp_buff_size = sizeof(uint8_t)+sizeof(int);
     unsigned char* risp_buff = (unsigned char*)malloc(risp_buff_size);
     if(!risp_buff)
@@ -957,7 +960,7 @@ int automatic_neg_response(int sock_id, int refused_user)
     uint8_t response = CHAT_NEG;
     memcpy(risp_buff, (void*)&response, sizeof(uint8_t));
     memcpy(risp_buff+1, (void*)&refused_user, sizeof(int));
-                
+    
     int ret = send_secure(sock_id, risp_buff, risp_buff_size);
     if(ret==-1){
         free(risp_buff);
@@ -1103,12 +1106,16 @@ int authentication(int sock_id, uint8_t ver)
             read_tmp = sizeof(uint32_t); // seq number read
             memcpy(&op_tmp, msg2_pt+read_tmp, sizeof(uint8_t));
             read_tmp += sizeof(uint8_t);
-            
+
             if(op_tmp==CHAT_CMD){
                 // automatic refuse
                 int rejected_user;
                 memcpy(&rejected_user, msg2_pt+read_tmp, sizeof(uint32_t));
-                automatic_neg_response(sock_id, rejected_user);
+                ret = automatic_neg_response(sock_id, rejected_user);
+                if(ret==-1){
+                    free(nonce);
+                    return -1;
+                }
             }
             else if(op_tmp!=AUTH){
                 free(nonce);
@@ -1570,12 +1577,16 @@ int authentication_receiver(int sock_id)
         read_tmp_checker = sizeof(uint32_t); // seq number read
         memcpy(&op_tmp_checker, pt_M1+read_tmp_checker, sizeof(uint8_t));
         read_tmp_checker += sizeof(uint8_t);
-            
+
         if(op_tmp_checker==CHAT_CMD){
             // automatic refuse
             int rejected_user;
             memcpy(&rejected_user, pt_M1+read_tmp_checker, sizeof(uint32_t));
-            automatic_neg_response(sock_id, rejected_user);
+            ret = automatic_neg_response(sock_id, rejected_user);
+            if(ret==-1){
+                safe_free(R1, NONCE_SIZE);
+                return -1;
+            }
         }
         else if(op_tmp_checker!=AUTH){
             safe_free(R1, NONCE_SIZE);
@@ -1774,12 +1785,15 @@ int authentication_receiver(int sock_id)
         read_tmp_checker = sizeof(uint32_t); // seq number read
         memcpy(&op_tmp_checker, msg3+read_tmp_checker, sizeof(uint8_t));
         read_tmp_checker += sizeof(uint8_t);
-            
         if(op_tmp_checker==CHAT_CMD){
             // automatic refuse
             int rejected_user;
             memcpy(&rejected_user, msg3+read_tmp_checker, sizeof(uint32_t));
-            automatic_neg_response(sock_id, rejected_user);
+            ret = automatic_neg_response(sock_id, rejected_user);
+            if(ret==-1){
+                safe_free(R1, NONCE_SIZE);
+                return -1;
+            }
         }
         else if(op_tmp_checker!=AUTH){
             safe_free(R1, NONCE_SIZE);
