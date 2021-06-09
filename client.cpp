@@ -224,9 +224,10 @@ void free_list_users(struct user* userlist)
  * @brief The function receives from the server the list of the user and it store it
  * 
  * @param plaintext received message decrypted
+ * @param pt_len length of the message decrypted
  * @return The number of online users, -1 if error, 0 if no user in the list
  */
-int retrieveOnlineUsers(unsigned char* plaintext)
+int retrieveOnlineUsers(unsigned char* plaintext, uint32_t pt_len)
 {
     if(plaintext==NULL)
         return -1;
@@ -299,6 +300,13 @@ int retrieveOnlineUsers(unsigned char* plaintext)
             return -1;
         }
         
+        if(bytes_read+username_size>pt_len){
+            cerr << " Error in reading plaintext " << endl;
+            free(tmp);
+            free_list_users(user_list);
+            user_list = NULL;
+            return -1;
+        }
         memcpy(tmp->username, plaintext+bytes_read, username_size);
         bytes_read += username_size;
         tmp->username[username_size] = '\0';
@@ -1162,6 +1170,12 @@ int authentication(int sock_id, uint8_t ver)
         }
     }
     else if(ver==AUTH_CLNT_CLNT){
+        if(read_from_msg2 + dh_pub_srv_key_size > msg2_pt_len){
+            free(server_nonce);
+            free(nonce);
+            free(dh_server_pubkey);
+            return -1;
+        }
         memcpy(dh_server_pubkey, msg2_pt+read_from_msg2, dh_pub_srv_key_size);
         read_from_msg2 += dh_pub_srv_key_size;
     }
@@ -1203,6 +1217,12 @@ int authentication(int sock_id, uint8_t ver)
         }
     }
     else if(ver==AUTH_CLNT_CLNT){
+        if(read_from_msg2 + len_signature > msg2_pt_len){
+            free(server_nonce);
+            free(nonce);
+            free(dh_server_pubkey);
+            return -1;
+        }
         memcpy(signature, msg2_pt+read_from_msg2, len_signature);
         read_from_msg2 += len_signature;
     }
@@ -1800,6 +1820,14 @@ int authentication_receiver(int sock_id)
         return -1;
     }
 
+    if(bytes_read + eph_pubkey_c_len > msg3_len){
+        cerr << " Error in message len " << endl;
+        safe_free(R2, NONCE_SIZE);
+        safe_free_privkey(eph_privkey_s);
+        safe_free(msg3, msg3_len);
+        safe_free(eph_pubkey_c,eph_pubkey_c_len);
+        return -1;
+    }
     memcpy(eph_pubkey_c, msg3+bytes_read, eph_pubkey_c_len);
     bytes_read += eph_pubkey_c_len;
 
@@ -1818,6 +1846,15 @@ int authentication_receiver(int sock_id)
         return -1;
     }
 
+    if(bytes_read + m3_signature_len > msg3_len){
+        cerr << " Error in message len " << endl;
+        safe_free(R2, NONCE_SIZE);
+        safe_free_privkey(eph_privkey_s);
+        safe_free(msg3, msg3_len);
+        safe_free(eph_pubkey_c,eph_pubkey_c_len);
+        safe_free(M3_signed, m3_signature_len);
+        return -1;
+    }
     memcpy(M3_signed, msg3+bytes_read, m3_signature_len);
     bytes_read += m3_signature_len;
 
@@ -1828,6 +1865,7 @@ int authentication_receiver(int sock_id)
         safe_free(R2, NONCE_SIZE);
         safe_free_privkey(eph_privkey_s);
         safe_free(eph_pubkey_c, eph_pubkey_c_len);
+        safe_free(M3_signed, m3_signature_len);
         return -1;
     }
     uint m3_document_size = eph_pubkey_c_len + NONCE_SIZE;
@@ -1895,9 +1933,10 @@ int authentication_receiver(int sock_id)
  * @brief handle an incoming chat request
  * 
  * @param plaintext message received
+ * @param pt_len message length
  * @return 1 if everything's ok, 0 on error(s)
  */
-int chatRequestHandler(unsigned char* plaintext)
+int chatRequestHandler(unsigned char* plaintext, uint32_t pt_len)
 {
     if(plaintext==NULL)
         return 0;
@@ -1933,6 +1972,10 @@ int chatRequestHandler(unsigned char* plaintext)
         return 0;
     }
 
+    if(bytes_read+size_username>pt_len){
+        cerr << " Errore in reading " << endl;
+        return 0;
+    }
     memcpy(counterpart, plaintext+bytes_read, size_username);
     bytes_read += size_username;
     counterpart[size_username] = '\0';
@@ -2169,7 +2212,7 @@ int arriveHandler(int sock_id){
     * ****************************************************************/
     switch (op){
     case ONLINE_CMD:{
-        ret = retrieveOnlineUsers(plaintext);
+        ret = retrieveOnlineUsers(plaintext, pt_len);
         if(ret == 0){
             cout << " ** No users are online ** " << endl;
         }
@@ -2263,7 +2306,7 @@ int arriveHandler(int sock_id){
     }
     break;
     case CHAT_CMD:
-        ret = chatRequestHandler(plaintext);
+        ret = chatRequestHandler(plaintext, pt_len);
         if(ret<=0) {
             error = true;
             perror("chat command");
