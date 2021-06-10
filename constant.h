@@ -56,7 +56,7 @@
  *  vvlog   |   3
 */
 
-#define VERBOSITY_LEVEL 1
+#define VERBOSITY_LEVEL 4
 
 
 /**************************

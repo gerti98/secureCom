@@ -2037,10 +2037,10 @@ int chatRequestHandler(unsigned char* plaintext, uint32_t pt_len)
     }
     isChatting = true; // to avoid interference during this phase
     peer_id = ntohl(id_cp);
-    peer_username = (char*)counterpart;
+    
     cout << "\n**********************************************************" << endl;
-    cout << "Do you want to chat with " << peer_username << " with user id " << peer_id << " ? (y/n)" << endl;
-    free(counterpart);
+    cout << "Do you want to chat with " << counterpart << " with user id " << peer_id << " ? (y/n)" << endl;
+   
     while(user_resp!='y' && user_resp!='n') {
         cin >> user_resp;
         if(cin.fail()){
@@ -2071,12 +2071,14 @@ int chatRequestHandler(unsigned char* plaintext, uint32_t pt_len)
     }
     free(risp_buff);
 
-    // I am now chatting with the user that request to contact me
-    // Clean stdin by what we have digit previously
-    cin.clear();
-    fflush(stdin);
-
-
+    if(response==CHAT_NEG){
+        cout << " Chat refused " << endl;
+        isChatting = false;
+        return 1;
+    }
+    peer_username = (char*)counterpart;
+    free(counterpart);
+    peer_id = ntohl(id_cp);
     // AUTENTICAZIONE CLIENT-CLIENT
     cout << "Wait for authentication ... " << endl;
     if(response==CHAT_POS){
@@ -2086,18 +2088,16 @@ int chatRequestHandler(unsigned char* plaintext, uint32_t pt_len)
             return 0;
         }
     }
-    else if(response==CHAT_NEG){
-        cout << " Chat refused " << endl;
-        isChatting = false;
-        return 1;
-    }
     else{
         cerr << " Something went wrong " << endl;
         return 0;
     }
-    
+    // I am now chatting with the user that request to contact me
+    // Clean stdin by what we have digit previously
+    cin.clear();
+    fflush(stdin);
     cout << "\n ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++" << endl;
-     cout << "                             CHAT                                   " << endl;
+    cout << "                             CHAT                                   " << endl;
     cout << " All the commands are ignored in this section except for !stop_chat " << endl;
     cout << " Send a message to " <<  peer_username << endl;
     cout << " ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++ \n" << endl;

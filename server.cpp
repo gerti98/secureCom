@@ -36,6 +36,7 @@ typedef void (*sighandler_t)(int);
 struct user_info {
     string username;
     int socket_id; 
+    int busy =0;
 };
 
 
@@ -148,6 +149,61 @@ int get_user_socket_by_user_id(int user_id){
     }
 
     return socket_id;
+}
+
+/**
+ * @brief test if the user is buidi in a chat request
+ * 
+ * @param user_id 
+ * @return int 0 if busy, 1 if free, -1 on error(s)
+ */
+int test_user_busy_by_user_id(int user_id){
+    
+    if(user_id < 0 || user_id >= REGISTERED_USERS){
+        log("ERROR: Invalid user id");
+        return -1;
+    }
+    sem_t* sem_id= sem_open(sem_user_store_name, O_CREAT, 0600, 1);
+    if(-1 == sem_prologue(sem_id)){
+        log("ERROR on sem_prologue");
+        return -1;
+    }
+    
+    user_info* user_status = (user_info*)shmem;
+    int ret=user_status[user_id].busy;
+    if(-1 == sem_epilogue(sem_id)){
+        log("ERROR on sem_epilogue");
+        return -1;
+    }
+    return !ret;
+}
+
+/**
+ * @brief set the user busy flag
+ * 
+ * @param user_id 
+ * @param busy 
+ * @return 1 on succes, -1 on error 
+ */
+int set_user_busy_by_user_id(int user_id, int busy){
+    
+    if(user_id < 0 || user_id >= REGISTERED_USERS){
+        log("ERROR: Invalid user id");
+        return -1;
+    }
+    sem_t* sem_id= sem_open(sem_user_store_name, O_CREAT, 0600, 1);
+    if(-1 == sem_prologue(sem_id)){
+        log("ERROR on sem_prologue");
+        return -1;
+    }
+    
+    user_info* user_status = (user_info*)shmem;
+    user_status[user_id].busy=busy;
+    if(-1 == sem_epilogue(sem_id)){
+        log("ERROR on sem_epilogue");
+        return -1;
+    }
+    return 1;
 }
 
 
@@ -1230,7 +1286,10 @@ int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& re
         log("Invalid input parameters on handle_chat_request");
         return -1;
     }
-
+    if(!set_user_busy_by_user_id(client_user_id, 1)){
+        log("ERROR: setting user busy while requesting to chat \n");
+        return -1;
+    }
     log("\n*** CHAT_REQUEST ***\n");
     uint offset_plaintext = 5; //From where data is good to read 
     uint offset_relay = 0;
@@ -1295,8 +1354,8 @@ int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& re
     vlog("Handle chat request (2)");
 
     //Handle case user is offline
-    if(get_user_socket_by_user_id(peer_user_id) == -1){
-        log("User: " + to_string(peer_user_id) + "is offline. Sending CHAT_NEG");
+    if(get_user_socket_by_user_id(peer_user_id) == -1 || !test_user_busy_by_user_id(peer_user_id)){
+        log("User: " + to_string(peer_user_id) + "is offline or busy. Sending CHAT_NEG");
         uchar chat_cmd = CHAT_NEG;
         offset_relay = 0; 
         memcpy((void*)(relay_msg.buffer + offset_relay), (void*)&chat_cmd, 1);
@@ -1311,8 +1370,7 @@ int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& re
 
     //Wait for response to the own named message queue (blocking)
     vlog("Handle chat request (3)");
-    relay_read(client_user_id, relay_msg, true);
-
+    relay_read(client_user_id, relay_msg, true); 
     memcpy((void*)(relay_msg.buffer + 1), (void*)&peer_user_id, sizeof(int));    
 
     
@@ -1321,6 +1379,10 @@ int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& re
     ret = send_secure(comm_socket_id, (uchar*)relay_msg.buffer, final_response_len);
     if(ret == 0){
         errorHandler(SEND_ERR);
+        return -1;
+    }
+    if(!set_user_busy_by_user_id(client_user_id, 0)){
+        log("ERROR: setting user busy while e ending requesting to chat \n");
         return -1;
     }
     return 0;    
@@ -1612,7 +1674,7 @@ int main(){
                     break;
 
                 case CHAT_CMD:
-                    if(-1 == handle_chat_request(comm_socket_id, client_user_id, relay_msg, plaintext)) {
+                    if(-1 == handle_chat_request(comm_socket_id, client_user_id, relay_msg, plaintext)) {   
                         log("Error on handle_chat_request");
                         safe_free(session_key, session_key_len);
                         set_user_socket(get_username_by_user_id(client_user_id), -1);
