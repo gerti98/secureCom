@@ -532,7 +532,7 @@ void signal_handler(int sig)
             }       
 
             // log("Sent to client : ");    
-            // BIO_dump_fp(stdout, (const char*)relay_msg.buffer, msg_len); //TODO: rimuovi
+            // BIO_dump_fp(stdout, (const char*)relay_msg.buffer, msg_len);
         } else {
             log("OPCODE not recognized (" + to_string(opcode) + ")");
         }
@@ -649,7 +649,6 @@ int send_secure(int comm_socket_id, uchar* pt, uint pt_len){
 
 uint32_t receive_counter=0;
 
-//TODO: basically unmodified, maybe can be added to crypto.cpp
 /**
  * @brief Receive in a secure way the messages sent by the server, decipher it and return the plaintext in the correspodent parameter. It
  * also control the sequence number
@@ -976,7 +975,7 @@ int handle_client_authentication(string pwd_for_keys){
         return -1;
     }
 
-    uint M2_size = NONCE_SIZE + 3*sizeof(uint) + eph_pubkey_s_len + M2_signed_length + certificate_len; //TODO:wrap
+    uint M2_size = NONCE_SIZE + 3*sizeof(uint) + eph_pubkey_s_len + M2_signed_length + certificate_len; 
     uint offset = 0;
     uchar* M2 = (uchar*)malloc(M2_size);
     if(!M2){
@@ -1075,7 +1074,7 @@ int handle_client_authentication(string pwd_for_keys){
     m3_signature_len = ntohl(m3_signature_len);
     vlog("M3 auth (3) m3_signature_len: "+ to_string(m3_signature_len));
 
-    uchar* M3_signed = (uchar*)malloc(m3_signature_len); //TODO: control tainted
+    uchar* M3_signed = (uchar*)malloc(m3_signature_len);
     if(!M3_signed){
         errorHandler(MALLOC_ERR);
         safe_free(R2, NONCE_SIZE);
@@ -1148,7 +1147,7 @@ int handle_client_authentication(string pwd_for_keys){
         return -1;    
     }
     // log("Shared Secret!");
-    // BIO_dump_fp(stdout, (const char*) shared_seceret, shared_seceret_len); //TODO: remove
+    // BIO_dump_fp(stdout, (const char*) shared_seceret, shared_seceret_len); 
     session_key_len=default_digest(shared_seceret, shared_seceret_len, &session_key);
     if(session_key_len == 0){
         log("Failed digest computation of the secret");
@@ -1277,11 +1276,11 @@ int handle_get_online_users(int comm_socket_id, uchar* plaintext){
 
 
 
-/**
+/**u
  *  @brief Handle the response to the client for the !chat command
  *  @return 0 in case of success, -1 in case of error
  */
-int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& relay_msg, uchar* plaintext){
+int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& relay_msg, uchar* plaintext, uint plain_len){
     if(comm_socket_id < 0 || client_user_id < 0 || client_user_id >= REGISTERED_USERS || plaintext == nullptr){
         log("Invalid input parameters on handle_chat_request");
         return -1;
@@ -1290,6 +1289,11 @@ int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& re
         log("ERROR: setting user busy while requesting to chat \n");
         return -1;
     }
+    if(plain_len != 9){
+        log("ERROR on length of plaintext");
+        return -1;
+    }
+
     log("\n*** CHAT_REQUEST ***\n");
     uint offset_plaintext = 5; //From where data is good to read 
     uint offset_relay = 0;
@@ -1393,9 +1397,13 @@ int handle_chat_request(int comm_socket_id, int client_user_id, msg_to_relay& re
  * @brief handle CHAT_POS and CHAT_NEG commands
  * @return -1 in case of errors, 0 in case of success
  */
-int handle_chat_pos_neg(uchar* plaintext, uint8_t opcode){
+int handle_chat_pos_neg(uchar* plaintext, uint8_t opcode, uint plain_len){
     if(plaintext == nullptr){
         log("ERROR invalid parameter on handle_chat_pos_neg");
+        return -1;
+    }
+    if(plain_len != 9){
+        log("INVALID plain_len");
         return -1;
     }
 
@@ -1674,7 +1682,7 @@ int main(){
                     break;
 
                 case CHAT_CMD:
-                    if(-1 == handle_chat_request(comm_socket_id, client_user_id, relay_msg, plaintext)) {   
+                    if(-1 == handle_chat_request(comm_socket_id, client_user_id, relay_msg, plaintext, plain_len)) {
                         log("Error on handle_chat_request");
                         safe_free(session_key, session_key_len);
                         set_user_socket(get_username_by_user_id(client_user_id), -1);
@@ -1686,7 +1694,7 @@ int main(){
                 case CHAT_POS: 
                 case CHAT_NEG:
                 case STOP_CHAT:
-                    if(-1 == handle_chat_pos_neg(plaintext, msgOpcode)){
+                    if(-1 == handle_chat_pos_neg(plaintext, msgOpcode, plain_len)){
                         log("Error on handle_chat_pos_neg");
                         safe_free(session_key, session_key_len);
                         set_user_socket(get_username_by_user_id(client_user_id), -1);
