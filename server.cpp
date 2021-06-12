@@ -382,7 +382,7 @@ void prior_cleanup(){
     //Add more space to buffer
     struct msqid_ds buf;
     msgctl(msgid, IPC_STAT, &buf);
-    buf.msg_qbytes = 120000;
+    buf.msg_qbytes = 600000;
     int ret = msgctl(msgid, IPC_SET, &buf);
     msgctl(msgid, IPC_STAT, &buf);    
     vlog("Message queue size: " + to_string(buf.msg_qbytes));
@@ -1546,12 +1546,12 @@ int handle_auth_and_msg(uchar* plaintext, uint8_t opcode, int plaintext_len){
 
 int main(){
     //Create shared memory for mantaining info about users
-    prior_cleanup();
-    int ret=system("sudo sysctl -w kernel.msgmni=16384 kernel.msgmax=120000 kernel.msgmnb=120000");
+    int ret=system("sudo sysctl -w kernel.msgmni=16384 kernel.msgmax=120000 kernel.msgmnb=600000");
     if(ret<0){
         log("failed to initialize kernel variables for message queue");
         return 0;
     }
+    prior_cleanup();
     if(shmem == MAP_FAILED){
         log("MMAP failed");
         return 0;
