@@ -112,17 +112,18 @@
 		\item answer to a chat request (if not already involved in another chat)
 		\item when in a chat, exchange text messages with another client or close the chat
 	\end{itemize}
-
+	Chat messages and clients interactions (commands, chat requests) have to be confidential; the
+	server have to be able to interpret the minumun amout of information needed to perform his operations.
 \newpage
 \chapter{Design choices}
 \section{Client Server Handshake}
 In order to authenticate themselves and establish a session key to securely communicate, a client
-and the server have to exchange handshake messages. We implement this protocol to provide perfect 
+and the server has to exchange handshake messages. We implement this protocol to provide perfect 
 forward secrecy, starting from the pre-shared cryptographic quantities (public keys and certificates):
 
 \begin{figure}[H]
 	\centering
-	\includegraphics[scale=0.4]{img/AuthClientServerVer2.png}
+	\includegraphics[scale=0.18]{img/AuthClientServerVer2.png}
 	\caption{Client Server Handshake Protocol Schema}
 	\label {img: AuthClientServer}
 \end{figure}
@@ -143,7 +144,7 @@ tunnel every client can execute command on the server in a secure way; the most 
 is a chat request, of which we provide a scheme:
 \begin{figure}[H]
 	\centering
-	\includegraphics[scale=0.5]{img/ChatRequestVer2.png}
+	\includegraphics[scale=0.23]{img/ChatRequestVer2.png}
 	\caption{Chat Request Protocol Schema}
 	\label {img: ChatRequest}
 \end{figure}
@@ -156,7 +157,7 @@ public keys, because the server provided them.
 
 \begin{figure}[H]
 	\centering
-	\includegraphics[scale=0.4]{img/AuthClientClientVer2.png}
+	\includegraphics[scale=0.18]{img/AuthClientClientVer2.png}
 	\caption{Client Client Handshake Protocol Schema}
 	\label {img: AuthClientClient}
 \end{figure}
