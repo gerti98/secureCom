@@ -2156,8 +2156,14 @@ int commandHandler(string userInput){
             break;
             
         case STOP_CHAT:
-            cmdToSend.opcode = STOP_CHAT;
-            isChatting = false;
+            if(isChatting){
+                cmdToSend.opcode = STOP_CHAT;
+                isChatting = false;
+            }
+            else{
+                no_comm_with_srv = true;
+                cout << "You are not chatting " << endl;
+            }
             break;
             
         case NOT_VALID_CMD:
