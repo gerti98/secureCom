@@ -7,5 +7,3 @@ crypto
 *.gz
 *.toc
 .vscode/
-/schema
-/doc
