@@ -1,7 +1,7 @@
 # secureCom
-***Foundations Of Cybersecurity*** Project - University Of Pisa - MSc in Computer Engineering.
+- ***Foundations Of Cybersecurity*** Project - University Of Pisa - MSc in Computer Engineering.
 
-SecureCom is a distributed, end to end encrypted, chat CLI application.
+SecureCom is a distributed, end to end encrypted, CLI application that implements a chat between users with security as non-functional requirement.
 
 Developed with **C/C++** and **OpenSSL**.
 
