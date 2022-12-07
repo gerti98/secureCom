@@ -4,7 +4,7 @@
 
 Project carried out as part of the Foundations Of Cybersecurity Exam for the M.Sc. in Computer Engineering at the University of Pisa.
 
-**SecureCom** is a distributed, end to end encrypted, CLI application that implements a chat between users with security as non-functional requirement.
+**SecureCom** is a distributed, end to end encrypted, CLI application that implements a chat between users with **security** on top of its non-functional requirement.
 
 Developed with **C/C++** and **OpenSSL**.
 
